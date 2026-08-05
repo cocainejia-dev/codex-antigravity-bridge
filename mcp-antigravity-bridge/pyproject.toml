@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-agy-bridge"
+version = "0.1.0"
+description = "MCP bridge: let Codex (and any MCP client) call the Google Antigravity CLI headlessly."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "mcp>=1.0,<2.0",
+]
+
+[project.optional-dependencies]
+# Windows ConPTY fallback for the agy empty-output bug (#76)
+winpty = ["pywinpty>=2.0"]
+# Deep agent-loop control via the official Antigravity SDK (multi-turn, streaming)
+sdk = ["google-antigravity>=0.1"]
+# Local smoke tests
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+codex-agy-bridge = "codex_agy_bridge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
