@@ -1,0 +1,8 @@
+# Codex MCP 配置示例。
+# 方式一：codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
+# 方式二：把下面这段合并进 ~/.codex/config.toml 或项目 .codex/config.toml
+
+[mcp_servers.codex-agy-bridge]
+command = "python"
+args = ["-m", "codex_agy_bridge"]
+# env = { AGY_PATH = "C:\\path\\to\\agy.exe" }
