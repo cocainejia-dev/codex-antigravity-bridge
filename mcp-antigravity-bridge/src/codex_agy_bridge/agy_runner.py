@@ -81,6 +81,20 @@ def find_agy() -> Optional[str]:
     return next((c for c in candidates if os.path.exists(c)), None)
 
 
+def _windows_short_path(path: str) -> str:
+    """Return an ASCII 8.3 path when Windows provides one."""
+    if sys.platform != "win32" or path.isascii():
+        return path
+
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetShortPathNameW(path, buffer, len(buffer))
+    if not length or length >= len(buffer):
+        return path
+    return buffer.value
+
+
 # --- runners ---------------------------------------------------------------
 
 
@@ -96,6 +110,7 @@ def run_agy(
     workdir: Optional[str] = None,
     timeout: float = 300.0,
     output_format: Optional[str] = None,
+    dangerously_skip_permissions: bool = False,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -112,8 +127,23 @@ def run_agy(
     args = [binary, "-p", prompt]
     if output_format:
         args += ["--output-format", output_format]
+    if dangerously_skip_permissions:
+        args += ["--dangerously-skip-permissions"]
 
-    direct = _run_subprocess(args, workdir, timeout)
+    launch_workdir = workdir
+    pty_workdir = workdir
+    if sys.platform == "win32" and workdir and not workdir.isascii():
+        ascii_workdir = _windows_short_path(workdir)
+        if ascii_workdir.isascii():
+            launch_workdir = ascii_workdir
+            pty_workdir = ascii_workdir
+        else:
+            # Fall back to an inherited cwd if Windows has no short path.
+            args += ["--add-dir", workdir]
+            launch_workdir = None
+            pty_workdir = None
+
+    direct = _run_subprocess(args, launch_workdir, timeout)
     if direct.stdout:
         return AgyResult(
             text=clean_agy_output(direct.stdout),
@@ -121,7 +151,7 @@ def run_agy(
             used_pty=False,
         )
 
-    pty_text, exit_code = _run_with_pty(args, workdir, timeout)
+    pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout)
     return AgyResult(text=clean_agy_output(pty_text), exit_code=exit_code, used_pty=True)
 
 
