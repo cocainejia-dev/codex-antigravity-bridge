@@ -22,7 +22,7 @@
   - `README.md` — 安装和接入 Codex 的完整说明
   - `examples/codex-config.toml` — Codex MCP 配置示例
   - `tests/test_smoke.py` — 单元测试
-- ✅ 项目 `mcp-server/`（早期版本）— 基于 fastmcp + CLI 的简化实现
+- ✅ 项目 `mcp-server/`（SDK 原型）— 基于 FastMCP + `google-antigravity` 的简化实现
 - ✅ `mcp-antigravity-bridge` 语法检查通过（`python -m compileall`）
 - ✅ 依赖安装验证（mcp 1.29.0 + FastMCP import 成功）
 
@@ -40,7 +40,7 @@
 - ⬜ 错误处理增强（认证失败、超时重试）
 
 ### 低优先级
-- ⬜ Python SDK 深度集成（`google-antigravity`，多轮对话、工具拦截）
+- ⬜ Python SDK 深度集成增强（`google-antigravity`，多轮对话、工具拦截）
 - ⬜ CI/CD（GitHub Actions）
 - ⬜ 发布到 PyPI
 - ⬜ npm/Go 实现版本

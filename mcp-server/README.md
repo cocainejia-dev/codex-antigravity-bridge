@@ -1,79 +1,108 @@
 # antigravity-mcp
 
-MCP server that bridges Codex (or any MCP client) to **Google Antigravity** via the official Python SDK.
+基于 Google Antigravity 官方 Python SDK 的 MCP 原型。它适合研究 SDK 的多轮对话、流式响应和工具控制；生产使用建议先选择上层目录的 [`mcp-antigravity-bridge`](../mcp-antigravity-bridge/)。
 
-## Architecture
+## 定位
 
+这个原型不启动 `agy` CLI，而是在 MCP server 进程内创建 SDK agent：
+
+```mermaid
+flowchart LR
+    A[Codex] -->|MCP stdio| B[antigravity-mcp]
+    B -->|Agent + LocalAgentConfig| C[google-antigravity SDK]
+    C --> D[Antigravity runtime / Gemini]
 ```
-Codex (MCP Client)
-   └─> antigravity-mcp (this server, stdin/stdout)
-         └─> google-antigravity SDK (Agent.chat, in-process)
-               └─> Google Antigravity / Gemini API
-```
 
-No CLI binary (`agy`) needed — the server calls the SDK directly in-process.
+每次 `run_agy` 调用都会创建一个短生命周期 agent，并收集 `response.text()`。
 
-## Prerequisites
+## 安装
 
-- Python 3.10+
-- A Gemini API key: set `GEMINI_API_KEY` in the environment, or pass `api_key` per tool call.
-
-## Setup
-
-```bash
+```powershell
 cd mcp-server
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-## Run Tests
+主要依赖：
 
-```bash
-pip install -e ".[dev]"
-pytest -q
+```text
+Python >= 3.10
+fastmcp >= 3.4
+google-antigravity >= 0.1.9
 ```
 
-## Register with Codex
+## 认证
 
-Create or edit `%USERPROFILE%\.codex\mcp.json` (Windows) or `~/.codex/mcp.json` (macOS/Linux):
+SDK 可以使用自己的环境配置，也可以通过工具参数传入 `api_key`。不要把 API key 写入 Git 仓库或提交到配置文件。
 
-```json
-{
-  "servers": {
-    "antigravity": {
-      "command": "python",
-      "args": ["-m", "antigravity_mcp.server"],
-      "cwd": "C:\\path\\to\\codex调用antigravity\\mcp-server",
-      "env": {
-        "GEMINI_API_KEY": "your-gemini-api-key"
-      }
-    }
-  }
-}
+如果使用 Gemini API key，可以在启动 Codex 前设置：
+
+```powershell
+$env:GEMINI_API_KEY = "your-key"
 ```
 
-Then restart Codex. The `run_agy` tool will appear in your available tools.
+也可以使用 SDK 支持的 Vertex AI / ADC 配置。
 
-## Tool: `run_agy`
+## 注册到 Codex
 
-| Parameter | Required | Description |
-|---|---|---|
-| `prompt` | yes | The prompt to send to Antigravity. |
-| `cwd` | no | Restrict file tools to this directory. Empty = no restriction. |
-| `api_key` | no | Gemini API key override. Empty = `GEMINI_API_KEY` env. |
-| `model` | no | Model name (e.g. `gemini-2.5-flash`). Empty = SDK default. |
-
-## Manual Smoke Test
-
-```bash
-cd mcp-server
-python -m antigravity_mcp.server
-# In another terminal, send an MCP JSON-RPC message:
-# echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_agy","arguments":{"prompt":"What is 2+2?"}}}' | python -m antigravity_mcp.server
+```toml
+[mcp_servers.antigravity]
+command = "python"
+args = ["-m", "antigravity_mcp"]
+cwd = "C:\\path\\to\\codex-antigravity-bridge\\mcp-server"
 ```
 
-## Files
+或者直接运行：
 
-- `mcp-server/antigravity_mcp/agy_runner.py` — SDK bridge (`LocalAgentConfig` + `Agent.chat`)
-- `mcp-server/antigravity_mcp/server.py` — FastMCP server exposing the `run_agy` tool
-- `mcp-server/tests/` — unit tests (pytest)
-- `mcp-server/pyproject.toml` — project metadata and dependencies
+```powershell
+python -m antigravity_mcp
+```
+
+## 工具：`run_agy`
+
+```text
+run_agy(
+    prompt: str,
+    cwd: str = "",
+    api_key: str = "",
+    model: str = "",
+) -> str
+```
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `prompt` | 是 | 发给 Antigravity 的任务描述 |
+| `cwd` | 否 | SDK 的 workspace 根目录 |
+| `api_key` | 否 | 单次调用的 Gemini API key 覆盖值 |
+| `model` | 否 | 单次调用的模型标识，留空使用 SDK 默认值 |
+
+`cwd` 会映射到 `LocalAgentConfig(workspaces=[...])`。空字符串表示使用 SDK 默认 workspace。
+
+## 测试
+
+```powershell
+python -m pytest -q
+```
+
+测试会 mock `Agent`、`LocalAgentConfig` 和响应对象，不会发起网络请求，也不要求本机已经完成 Antigravity 登录。
+
+## 文件结构
+
+```text
+antigravity_mcp/
+├── agy_runner.py    # SDK 生命周期、workspace、超时和错误映射
+├── server.py        # FastMCP 工具注册
+└── __main__.py      # python -m antigravity_mcp 入口
+```
+
+## 与 CLI bridge 的区别
+
+| 项目 | CLI bridge | SDK prototype |
+| --- | --- | --- |
+| 进程模型 | 启动 `agy` 子进程 | Python 进程内创建 agent |
+| 非 TTY 回退 | 支持 ConPTY / pty | 不适用 |
+| 认证 | 由 CLI 管理 | 由 SDK 环境或 `api_key` 管理 |
+| 推荐用途 | 日常 Codex 委托 | SDK 能力实验 |
+
+## License
+
+Apache-2.0

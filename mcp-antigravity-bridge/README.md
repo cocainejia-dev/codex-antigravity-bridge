@@ -1,51 +1,59 @@
 # codex-agy-bridge
 
-让 **Codex**（或任何 MCP 客户端）通过 MCP 调用 **Google Antigravity** agent 的桥接工具。
+推荐的 Codex -> Antigravity MCP bridge。它通过 `agy -p` 调用 Google Antigravity CLI，并在普通 subprocess 没有输出时自动回退到伪终端。
 
+## 为什么需要这个 bridge
+
+Antigravity CLI 的交互模式是 TUI，而 Codex 需要通过 MCP 使用一个稳定的 stdio server。部分 CLI 构建版本在 stdout 不是 TTY 时可能返回空输出；本项目会按以下顺序处理：
+
+1. 普通 subprocess 调用。
+2. Windows 使用 ConPTY 重试，依赖 `pywinpty`。
+3. macOS/Linux 使用标准库 `pty` 重试。
+4. 清理 ANSI 控制字符和 TUI 装饰后返回文本。
+
+```mermaid
+flowchart LR
+    A[Codex] -->|MCP stdio| B[codex-agy-bridge]
+    B -->|subprocess| C[agy -p]
+    B -. 空输出 .-> D[ConPTY / pty fallback]
+    C --> E[Antigravity response]
+    D --> E
 ```
-Codex (MCP Client)
-   │  MCP (stdio)
-   ▼
-codex-agy-bridge (MCP Server, Python)
-   │  subprocess / pty
-   ▼
-agy -p "<prompt>" --output-format json   (Antigravity CLI headless)
-```
-
-## 为什么需要它
-
-- Antigravity CLI（`agy`）默认是交互式 TUI；`agy -p` 提供非交互 headless 模式。
-- 部分构建版本 `agy -p` 会因 stdout 不是 TTY 而输出为空（上游 issue #76），
-  本项目先走普通 subprocess，输出为空时自动回退到伪终端
-  （Windows 用 ConPTY / `pywinpty`，macOS/Linux 用 stdlib `pty`），并清理 ANSI/TUI 噪音。
-- Codex 原生支持 MCP，无需插件即可注册本 server。
 
 ## 安装
 
-1. 安装 Antigravity CLI（Windows PowerShell）：
+### 1. 安装 Antigravity CLI
 
-   ```powershell
-   irm https://antigravity.google/cli/install.ps1 | iex
-   ```
+Windows PowerShell：
 
-   其他平台见 https://antigravity.google/docs/cli/overview
+```powershell
+irm https://antigravity.google/cli/install.ps1 | iex
+```
 
-2. 安装本桥（Windows 建议带 `winpty` 依赖）：
+其他平台请参考 [CLI 文档](https://antigravity.google/docs/cli/overview)。
 
-   ```powershell
-   cd mcp-antigravity-bridge
-   pip install -e ".[winpty]"
-   ```
+### 2. 安装 bridge
+
+```powershell
+cd mcp-antigravity-bridge
+python -m pip install -e ".[winpty]"
+```
+
+开发测试依赖：
+
+```powershell
+python -m pip install -e ".[dev]"
+```
 
 ## 接入 Codex
 
-方式一（推荐）：
+推荐使用命令注册：
 
 ```powershell
 codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
 ```
 
-方式二：手动在 `~/.codex/config.toml` 加入（参考 `examples/codex-config.toml`）：
+也可以手动添加到 Codex 配置：
 
 ```toml
 [mcp_servers.codex-agy-bridge]
@@ -53,38 +61,87 @@ command = "python"
 args = ["-m", "codex_agy_bridge"]
 ```
 
-然后在 Codex 里直接说：*"用 agy_ask 让 Antigravity 帮我审查这个仓库的 TODO"*。
+注册后，Codex 可以调用 `agy_ask` 或 `agy_ask_json`。
 
 ## 工具
 
-| 工具 | 说明 |
-|------|------|
-| `agy_ask(prompt, workdir?, timeout?)` | 单轮 headless 调用，返回清洗后的文本 |
-| `agy_ask_json(prompt, workdir?, timeout?)` | 同上，`--output-format json` 结构化输出 |
+### `agy_ask`
 
-环境变量：`AGY_PATH` 可显式指定 `agy` 二进制路径。
-
-## 深度控制（可选）
-
-需要多轮对话、流式响应、工具调用拦截时，把底层换成官方 SDK：
-
-```bash
-pip install -e ".[sdk]"
+```text
+agy_ask(prompt: str, workdir: str = "", timeout: float = 300.0) -> str
 ```
 
-然后参考 https://github.com/google-antigravity/antigravity-sdk-python 的
-`Agent` / `Conversation` API 扩展 `server.py`。
+适合普通文本回答。`workdir` 为空时继承 MCP server 的当前目录。
 
-## 参考项目
+### `agy_ask_json`
 
-- https://github.com/rhishi99/agy-headless-bridge — Windows ConPTY 空输出修复（本项目的 pty 方案来源）
-- https://github.com/sshahzaiib/agy-bridge — Claude Code → agy 的 MCP bridge（TypeScript）
-- https://github.com/yyu0310/cc-to-antigravity-cli-bridge — Claude Code → agy
-- https://github.com/google-antigravity/antigravity-sdk-python — 官方 Python SDK
+```text
+agy_ask_json(prompt: str, workdir: str = "", timeout: float = 300.0) -> str
+```
+
+会向 CLI 追加 `--output-format json`，并以文本形式返回结构化输出。需要在 prompt 中明确要求模型返回的内容结构。
+
+## 配置
+
+### `AGY_PATH`
+
+显式指定 CLI 可执行文件路径：
+
+```powershell
+$env:AGY_PATH = "C:\\path\\to\\agy.exe"
+```
+
+如果未设置，bridge 会依次检查 PATH 和常见的本地安装目录。
+
+### `pywinpty`
+
+`pywinpty` 是 Windows ConPTY 回退依赖。它不是普通调用的硬依赖，但 Windows 环境建议安装，以应对 CLI 非 TTY 空输出。
+
+## 常见问题
+
+### `agy binary not found`
+
+确认 CLI 已安装，或设置 `AGY_PATH`。可以先直接运行：
+
+```powershell
+agy --version
+```
+
+### 认证失败
+
+先在终端交互运行一次 `agy` 完成登录，然后重新调用 MCP 工具。认证状态由 CLI 管理，bridge 不保存账号凭据。
+
+### 返回空文本
+
+Windows 安装 `pywinpty` 后重试。bridge 会自动切换到 ConPTY；如果仍然为空，先确认同一个 prompt 能在 CLI 中单独完成。
+
+### 超时
+
+增大工具的 `timeout` 参数，或减少 prompt 的工作范围。超时是整个 CLI 调用的墙钟时间限制。
 
 ## 测试
 
-```bash
-pip install -e ".[dev]"
-pytest
+```powershell
+python -m pytest -q
 ```
+
+测试不要求本机已经安装或登录 `agy`，只覆盖输出清理和二进制发现逻辑。
+
+## 文件结构
+
+```text
+src/codex_agy_bridge/
+├── agy_runner.py    # subprocess、ConPTY/pty 回退、ANSI 清理
+├── server.py        # FastMCP 工具注册
+└── __main__.py      # python -m codex_agy_bridge 入口
+```
+
+## 参考
+
+- [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli)
+- [agy-headless-bridge](https://github.com/rhishi99/agy-headless-bridge)
+- [agy-bridge](https://github.com/sshahzaiib/agy-bridge)
+
+## License
+
+Apache-2.0

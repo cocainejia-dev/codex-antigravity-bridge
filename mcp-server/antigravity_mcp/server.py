@@ -1,4 +1,4 @@
-"""FastMCP server exposing the Antigravity CLI (agy -p) to MCP clients like Codex."""
+"""FastMCP server exposing the Antigravity Python SDK to MCP clients."""
 
 from __future__ import annotations
 
@@ -10,18 +10,24 @@ mcp = FastMCP("antigravity")
 
 
 @mcp.tool()
-def run_agy(prompt: str, cwd: str = "") -> str:
-    """Run a prompt through the Google Antigravity CLI in headless mode (agy -p).
+def run_agy(
+    prompt: str,
+    cwd: str = "",
+    api_key: str = "",
+    model: str = "",
+) -> str:
+    """Run a prompt through the Google Antigravity Python SDK.
 
     Args:
         prompt: The user prompt to send to Antigravity.
-        cwd: Optional working directory to run the CLI in. Empty string means
-            inherit the server's current working directory.
+        cwd: Optional SDK workspace root. Empty means use the SDK default.
+        api_key: Optional Gemini API key override.
+        model: Optional model identifier. Empty means use the SDK default.
 
     Returns:
-        The Antigravity response text.
+        The Antigravity response text, or a readable SDK error.
     """
-    runner = AgyRunner()
+    runner = AgyRunner(api_key=api_key or None, model=model or None)
     try:
         result = runner.run_prompt(prompt, cwd=cwd or None)
     except AgyError as exc:

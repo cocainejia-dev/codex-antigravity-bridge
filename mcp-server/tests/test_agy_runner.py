@@ -1,85 +1,98 @@
-import json
-import subprocess
-from types import SimpleNamespace
+import asyncio
 from unittest import mock
 
 import pytest
 
+from antigravity_mcp import agy_runner
 from antigravity_mcp.agy_runner import AgyError, AgyResult, AgyRunner, AgyTimeoutError
 
 
-def _completed(stdout, stderr="", returncode=0):
-    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+class FakeResponse:
+    async def text(self):
+        return "hello antigravity"
 
 
-def _ok_json(text="hello antigravity"):
-    return json.dumps({"status": "OK", "response": text, "num_turns": 1})
+class FakeAgent:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    async def chat(self, prompt):
+        assert prompt == "Say hi"
+        return FakeResponse()
 
 
-def test_run_prompt_returns_text():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(_ok_json())) as run:
-        result = AgyRunner(agy_binary="agy").run_prompt("Say hi")
+def test_run_prompt_returns_sdk_text():
+    with mock.patch.object(agy_runner, "LocalAgentConfig") as config_cls:
+        with mock.patch.object(agy_runner, "Agent", return_value=FakeAgent()):
+            result = AgyRunner().run_prompt("Say hi")
+
+    assert isinstance(result, AgyResult)
     assert result.text == "hello antigravity"
     assert result.exit_code == 0
-    cmd = run.call_args.args[0]
-    assert cmd[:2] == ["agy", "-p"]
+    config_cls.assert_called_once_with()
 
 
-def test_run_prompt_passes_cwd():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(_ok_json("ok"))) as run:
-        AgyRunner(agy_binary="agy").run_prompt("Q", cwd=r"C:\work")
-    assert run.call_args.kwargs["cwd"] == r"C:\work"
+def test_run_prompt_passes_workspace_api_key_and_model():
+    with mock.patch.object(agy_runner, "LocalAgentConfig") as config_cls:
+        with mock.patch.object(agy_runner, "Agent", return_value=FakeAgent()):
+            AgyRunner(api_key="secret", model="gemini-test").run_prompt(
+                "Say hi", cwd=r"C:\work"
+            )
+
+    assert config_cls.call_args.kwargs == {
+        "workspaces": [r"C:\work"],
+        "api_key": "secret",
+        "model": "gemini-test",
+    }
 
 
-def test_run_prompt_no_cwd_means_none():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(_ok_json("ok"))) as run:
-        AgyRunner(agy_binary="agy").run_prompt("Q")
-    assert run.call_args.kwargs["cwd"] is None
-
-
-def test_run_prompt_exposes_raw_json():
-    raw = {"status": "OK", "response": "done", "usage": {"total_tokens": 42}}
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(json.dumps(raw))):
-        result = AgyRunner(agy_binary="agy").run_prompt("Q")
-    assert result.raw == raw
-
-
-def test_run_prompt_raises_on_error_status():
-    bad = json.dumps({"status": "ERROR", "error": "something broke"})
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(bad)):
-        with pytest.raises(AgyError) as exc:
-            AgyRunner(agy_binary="agy").run_prompt("Q")
-    assert "something broke" in str(exc.value)
-
-
-def test_run_prompt_raises_on_auth_error():
-    bad = json.dumps({"status": "ERROR", "error": "authentication failed or timed out"})
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed(bad)):
-        with pytest.raises(AgyError) as exc:
-            AgyRunner(agy_binary="agy").run_prompt("Q")
-    assert "authentication required" in str(exc.value)
+def test_run_prompt_rejects_empty_prompt():
+    with pytest.raises(AgyError, match="prompt must not be empty"):
+        AgyRunner().run_prompt("  ")
 
 
 def test_run_prompt_raises_on_empty_response():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", return_value=_completed("")):
-        with pytest.raises(AgyError) as exc:
-            AgyRunner(agy_binary="agy").run_prompt("Q")
-    assert "empty" in str(exc.value).lower()
+    class EmptyResponse(FakeResponse):
+        async def text(self):
+            return ""
+
+    class EmptyAgent(FakeAgent):
+        async def chat(self, prompt):
+            return EmptyResponse()
+
+    with mock.patch.object(agy_runner, "Agent", return_value=EmptyAgent()):
+        with pytest.raises(AgyError, match="empty response"):
+            AgyRunner().run_prompt("Q")
 
 
 def test_run_prompt_raises_on_timeout():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", side_effect=subprocess.TimeoutExpired("agy", 1)):
+    async def slow_call(prompt, cwd, api_key, model):
+        await asyncio.sleep(0.05)
+        return "too late"
+
+    with mock.patch.object(agy_runner, "_run_sdk", side_effect=slow_call):
         with pytest.raises(AgyTimeoutError):
-            AgyRunner(timeout_seconds=1, agy_binary="agy").run_prompt("Q")
+            AgyRunner(timeout_seconds=0.001).run_prompt("Q")
 
 
-def test_run_prompt_raises_when_binary_missing():
-    with mock.patch("antigravity_mcp.agy_runner.subprocess.run", side_effect=OSError("no such file")):
-        with pytest.raises(AgyError) as exc:
-            AgyRunner(agy_binary="no-such-agy").run_prompt("Q")
-    assert "failed to start" in str(exc.value)
+def test_run_prompt_wraps_sdk_errors():
+    async def failing_call(prompt, cwd, api_key, model):
+        raise RuntimeError("connection failed")
+
+    with mock.patch.object(agy_runner, "_run_sdk", side_effect=failing_call):
+        with pytest.raises(AgyError, match="connection failed"):
+            AgyRunner().run_prompt("Q")
 
 
-def test_find_agy_prefers_explicit_binary():
-    from antigravity_mcp.agy_runner import find_agy
-    assert find_agy("custom-agy") == "custom-agy"
+def test_run_prompt_works_inside_an_existing_event_loop():
+    async def fake_call(prompt, cwd, api_key, model):
+        return "nested loop response"
+
+    async def invoke_from_loop():
+        with mock.patch.object(agy_runner, "_run_sdk", side_effect=fake_call):
+            return AgyRunner().run_prompt("Q").text
+
+    assert asyncio.run(invoke_from_loop()) == "nested loop response"

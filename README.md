@@ -1,89 +1,166 @@
-﻿# 🤖 Codex → Antigravity 桥接工具
+<div align="center">
 
-让 **OpenAI Codex**（或任何 MCP 客户端）调用 **Google Antigravity** agent 的完整方案。
+# Codex <-> Antigravity Bridge
 
-> 从调研 → 原型 → 完整实现的落地仓库。
+让 OpenAI Codex 通过 MCP 调用 Google Antigravity agent。
 
----
+一个仓库，两条路径：推荐的 CLI bridge，以及用于深度实验的 Python SDK prototype。
 
-## 🎯 目标
+</div>
 
-在 Codex 会话中，直接把任务委托给 Google Antigravity 的 agent 引擎，复用两家的模型与工具链：
+## 项目定位
 
+这个项目把 Codex 和 Antigravity 连接起来：Codex 负责发起任务，MCP server 负责转发，Antigravity 负责执行 agent 工作流。
+
+```mermaid
+flowchart LR
+    A[Codex] -->|MCP stdio| B[Bridge MCP Server]
+    B --> C{调用方式}
+    C -->|推荐| D[agy CLI headless]
+    C -->|原型| E[google-antigravity SDK]
+    D --> F[Antigravity Agent]
+    E --> F
 ```
-┌─────────────┐      MCP (stdio)      ┌────────────────────┐      subprocess / pty      ┌─────────────────┐
-│    Codex     │ ───────────────────▶ │  antigravity-mcp   │ ────────────────────────▶ │  agy (CLI)      │
-│ (MCP Client) │                      │  (MCP Server)      │                            │ (Antigravity)   │
-└─────────────┘                      └────────────────────┘                            └─────────────────┘
-```
 
----
+## 选择实现
 
-## 📦 仓库结构
+| 实现 | 调用方式 | 适合场景 | 状态 |
+| --- | --- | --- | --- |
+| [`mcp-antigravity-bridge`](mcp-antigravity-bridge/) | `agy -p` + ConPTY/pty 回退 | 稳定的单轮 Codex 委托 | **推荐** |
+| [`mcp-server`](mcp-server/) | `Agent(LocalAgentConfig)` + `Agent.chat` | SDK、模型和多轮能力实验 | 原型 |
 
-| 目录 | 说明 | 状态 |
-|------|------|------|
-| [`mcp-antigravity-bridge/`](mcp-antigravity-bridge/) | **完整版** MCP Server（FastMCP + pty 回退），支持 Windows ConPTY | ✅ 推荐 |
-| [`mcp-server/`](mcp-server/) | 早期简化版 MCP Server（SDK 直连） | 🧪 原型 |
-| [`research/`](research/) | 调研报告 + 官方文档快照 | ✅ 完成 |
-| [`PROGRESS.md`](PROGRESS.md) | 已完成 / 未完成任务清单 | 📋 持续更新 |
+推荐从 `mcp-antigravity-bridge` 开始。它不需要在 Python 进程内管理 SDK 生命周期，并针对部分 `agy` 版本的非 TTY 空输出问题提供了自动回退。
 
----
+## 快速开始
 
-## ✨ 特性
+### 1. 安装 Antigravity CLI
 
-- 🚀 **原生 MCP 集成** — Codex 无需插件，注册即可用
-- 🖥️ **跨平台** — Windows ConPTY / macOS / Linux pty 回退，解决 `agy` 空输出 bug（#76）
-- 🧹 **输出清洗** — 自动剥离 ANSI / TUI 噪音，返回干净文本或 JSON
-- 🔌 **工具化** — `agy_ask`（文本）、`agy_ask_json`（结构化输出）
-- 🧩 **可升级** — 底层可切换为官方 Python SDK（多轮对话、流式响应、工具拦截）
+Windows PowerShell：
 
----
-
-## 🚀 快速开始
-
-```bash
-# 1. 安装 Antigravity CLI（Windows PowerShell）
+```powershell
 irm https://antigravity.google/cli/install.ps1 | iex
+```
 
-# 2. 安装 MCP 桥
+其他平台请参考 [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview)。
+
+### 2. 安装推荐 bridge
+
+```powershell
 cd mcp-antigravity-bridge
-pip install -e ".[winpty]"
+python -m pip install -e ".[winpty]"
+```
 
-# 3. 注册到 Codex
+Windows 推荐安装 `pywinpty`，这样 CLI 在普通管道没有输出时可以通过 ConPTY 重试。
+
+### 3. 注册到 Codex
+
+```powershell
 codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
 ```
 
-然后在 Codex 中直接说：
+注册后，可以在 Codex 中直接提出类似请求：
 
-> *"用 agy_ask 让 Antigravity 帮我审查这个仓库的 TODO"*
+```text
+用 agy_ask 让 Antigravity 检查这个仓库的未完成项，并给出修复建议。
+```
 
----
+## MCP 工具
 
-## 🔍 调研结论
+### CLI bridge
 
-| 接口 | 形态 | 适用场景 |
-|------|------|----------|
-| **CLI headless** | `agy -p "prompt" --output-format json` | 快速、单轮、无依赖 |
-| **Python SDK** | `google-antigravity`（官方） | 多轮、流式、深度控制 |
-| **MCP** | 官方全线支持 | Codex 等 MCP 客户端直接对接 |
+| 工具 | 签名 | 说明 |
+| --- | --- | --- |
+| `agy_ask` | `agy_ask(prompt, workdir="", timeout=300.0)` | 单轮 headless 调用，返回清洗后的文本 |
+| `agy_ask_json` | `agy_ask_json(prompt, workdir="", timeout=300.0)` | 请求 `--output-format json`，以文本形式返回结构化 CLI 输出 |
 
-GitHub 生态现状：暂无「Codex → Antigravity」专用库，社区方案集中在
-**CLI 桥接**（`agy-bridge`）、**API 网关**（`CLIProxyAPI` 46k★）和**多代理编排**（`hcom`、`jinn`）。
-详见 [`research/codex-antigravity-cases.md`](research/codex-antigravity-cases.md)。
+### SDK prototype
 
----
+| 工具 | 签名 | 说明 |
+| --- | --- | --- |
+| `run_agy` | `run_agy(prompt, cwd="", api_key="", model="")` | 在 Python 进程内创建 SDK agent 并收集响应 |
 
-## 📚 参考项目
+## SDK 原型
 
-- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — 46k★，Antigravity/Codex 统一 API 网关
-- [sshahzaiib/agy-bridge](https://github.com/sshahzaiib/agy-bridge) — Claude Code → agy MCP 桥
-- [rhishi99/agy-headless-bridge](https://github.com/rhishi99/agy-headless-bridge) — Windows ConPTY 空输出修复
-- [google-antigravity/antigravity-sdk-python](https://github.com/google-antigravity/antigravity-sdk-python) — 官方 SDK（2.8k★）
-- [google-antigravity/antigravity-cli](https://github.com/google-antigravity/antigravity-cli) — 官方 CLI（1.8k★）
+如果需要直接控制官方 Python SDK，可以使用：
 
----
+```powershell
+cd mcp-server
+python -m pip install -e ".[dev]"
+```
 
-## 📄 License
+这个实现使用 `google-antigravity` 的 `LocalAgentConfig` 和 `Agent.chat`，不启动 `agy` CLI。它更适合研究多轮对话、流式响应和工具拦截；详细配置见 [`mcp-server/README.md`](mcp-server/README.md)。
+
+## 手动配置
+
+推荐使用 `codex mcp add`。也可以参考 [`examples/codex-config.toml`](mcp-antigravity-bridge/examples/codex-config.toml)：
+
+```toml
+[mcp_servers.codex-agy-bridge]
+command = "python"
+args = ["-m", "codex_agy_bridge"]
+```
+
+## 测试
+
+CLI bridge：
+
+```powershell
+cd mcp-antigravity-bridge
+python -m pip install -e ".[dev]"
+python -m pytest -q
+```
+
+SDK prototype：
+
+```powershell
+cd mcp-server
+python -m pip install -e ".[dev]"
+python -m pytest -q
+```
+
+测试默认使用 mock，不会自动调用真实模型或消耗 API 配额。
+
+## 常见问题
+
+### 找不到 `agy`
+
+确认 CLI 已安装并且位于 PATH。也可以显式指定：
+
+```powershell
+$env:AGY_PATH = "C:\\path\\to\\agy.exe"
+```
+
+### 认证失败
+
+先在本地交互运行一次 `agy` 完成登录，再重新启动 MCP server。SDK prototype 则使用 SDK 支持的环境变量、ADC 或 `api_key` 参数。
+
+### CLI 没有输出
+
+bridge 会先尝试普通 subprocess；如果检测到空输出，会自动使用 Windows ConPTY 或 POSIX pty 重试。Windows 建议安装 `pywinpty`。
+
+### 调用超时
+
+为 `agy_ask` 或 `agy_ask_json` 增大 `timeout` 参数，并确认 Antigravity CLI 可以单独完成同一个 prompt。
+
+## 项目结构
+
+```text
+.
+├── mcp-antigravity-bridge/   # 推荐：CLI + pty 回退
+├── mcp-server/               # 原型：Python SDK 直连
+├── research/                 # 调研报告与官方文档快照
+├── PROGRESS.md               # 项目进度
+└── LICENSE                   # Apache-2.0
+```
+
+## 参考资料
+
+- [Google Antigravity CLI](https://github.com/google-antigravity/antigravity-cli)
+- [Google Antigravity Python SDK](https://github.com/google-antigravity/antigravity-sdk-python)
+- [agy-headless-bridge](https://github.com/rhishi99/agy-headless-bridge)
+- [agy-bridge](https://github.com/sshahzaiib/agy-bridge)
+- [项目调研报告](research/codex-antigravity-cases.md)
+
+## License
 
 Apache-2.0
