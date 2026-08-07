@@ -152,6 +152,16 @@ codex mcp list
 
 看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，就可以在 Codex 中使用它。
 
+### 代理与登录行为
+
+安装器会在安装时探测环境代理、Windows 系统代理和常见本地端口；桥接器还会在每次 AGY 调用前重新检查当前代理。运行时自动发现结果只缓存约 60 秒，不会启动后台服务或持续占用资源。切换代理软件或 TUN 状态后，下一次调用会按当前环境刷新代理信息。
+
+代理可通过 `AGY_PROXY_URL`、`PROXY_URL` 或 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 显式指定。自动探测不到时，建议使用完整地址，例如 `http://127.0.0.1:7897` 或 `socks5://127.0.0.1:1080`。
+
+代理变化通常不会清除 AGY 的登录状态，因此不需要重复登录。如果错误是 `AGY_PROXY_ERROR`，请先检查代理或 TUN；只有看到 `AGY_LOGIN_REQUIRED` 时才需要通过可用代理运行 `agy` 完成交互式登录。登录完成后告诉 Codex 重试，原任务只会由上层重新执行一次。
+
+Windows 手动配置 MCP 时，请把 `command` 写成真实 Python 可执行文件的绝对路径，不要使用可能指向 Microsoft Store shim 的 `python` 命令。官方安装脚本会自动解析并写入该路径。
+
 <a id="tools"></a>
 
 ## 🧰 六个工具

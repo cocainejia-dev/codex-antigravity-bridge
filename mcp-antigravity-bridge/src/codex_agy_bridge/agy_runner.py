@@ -18,11 +18,14 @@ import os
 import re
 import select
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlsplit
 
 # --- ANSI / TUI noise stripping -------------------------------------------
 
@@ -33,6 +36,55 @@ _ANSI_OTHER = re.compile(r"\x1b[@-Z\\-_]")
 _SPINNER = set(
     "⠁⠂⠄⡀⢀⠠⠐⠈⣾⣽⣻⢿⡿⣟⣯⣷⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     "│─┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝▌▐█▏▕"
+)
+
+_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
+_PROXY_ENV_NAMES = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+)
+_PROXY_PORTS = (7890, 7891, 7892, 7897, 1080, 10808, 10809, 8080, 8888, 3128)
+_PROXY_CACHE_TTL = 60.0
+_proxy_cache: tuple[float, Optional[str]] | None = None
+_proxy_cache_lock = threading.Lock()
+
+_NETWORK_ERROR_MARKERS = (
+    "dial tcp",
+    "connectex",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "network is unreachable",
+    "no such host",
+    "proxyconnect",
+    "proxy connection",
+    "connection failed",
+    "failed to connect",
+    "could not connect",
+    "failed to fetch",
+    "network error",
+    "timed out",
+    "timeout",
+    "eof while connecting",
+)
+_AUTH_ERROR_MARKERS = (
+    "authentication required",
+    "authentication failed",
+    "login required",
+    "login to continue",
+    "invalid token",
+    "token is invalid",
+    "invalid_token",
+    "invalid_grant",
+    "authorization failed",
+    "unauthenticated",
+    "oauth token",
+    "please run `agy`",
+    "run agy to log in",
 )
 
 
@@ -106,6 +158,169 @@ class AgyResult:
     stderr: str = ""
 
 
+def _normalise_proxy_url(value: str | None) -> Optional[str]:
+    if not value or not value.strip():
+        return None
+    candidate = value.strip().rstrip("/")
+    try:
+        parsed = urlsplit(candidate)
+        if parsed.scheme.lower() not in _PROXY_SCHEMES or not parsed.hostname:
+            return None
+        if parsed.port is None or not 1 <= parsed.port <= 65535:
+            return None
+    except ValueError:
+        return None
+    return candidate
+
+
+def _environment_value(environ: dict[str, str], name: str) -> Optional[str]:
+    for key in (name, name.lower()):
+        value = environ.get(key)
+        if value:
+            return value
+    return None
+
+
+def _first_proxy_value(environ: dict[str, str], names: tuple[str, ...]) -> Optional[str]:
+    for name in names:
+        proxy = _normalise_proxy_url(_environment_value(environ, name))
+        if proxy:
+            return proxy
+    return None
+
+
+def _is_local_proxy(url: str) -> bool:
+    try:
+        hostname = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+def _probe_local_proxy_port(port: int, timeout: float = 0.25) -> Optional[str]:
+    """Detect a local HTTP CONNECT or SOCKS5 listener without reaching the internet."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+            connection.settimeout(timeout)
+            request = (
+                b"CONNECT oauth2.googleapis.com:443 HTTP/1.1\r\n"
+                b"Host: oauth2.googleapis.com:443\r\n\r\n"
+            )
+            connection.sendall(request)
+            response = connection.recv(128)
+            if re.match(rb"HTTP/\d(?:\.\d)?\s+200\b", response):
+                return f"http://127.0.0.1:{port}"
+    except (OSError, ValueError):
+        pass
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+            connection.settimeout(timeout)
+            connection.sendall(b"\x05\x01\x00")
+            response = connection.recv(2)
+            if response == b"\x05\x00":
+                return f"socks5://127.0.0.1:{port}"
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _windows_system_proxy() -> Optional[str]:
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+            server = winreg.QueryValueEx(key, "ProxyServer")[0]
+    except (ImportError, OSError):
+        return None
+    if enabled != 1 or not server:
+        return None
+
+    match = re.search(r"(?i)(?:https|http|all)=(?P<proxy>[^;]+)", str(server))
+    value = match.group("proxy") if match else str(server)
+    if "://" not in value:
+        value = f"http://{value}"
+    return _normalise_proxy_url(value)
+
+
+def _discover_runtime_proxy() -> Optional[str]:
+    system_proxy = _windows_system_proxy()
+    if system_proxy:
+        return system_proxy
+    for port in _PROXY_PORTS:
+        proxy = _probe_local_proxy_port(port)
+        if proxy:
+            return proxy
+    return None
+
+
+def _cached_runtime_proxy(force: bool = False) -> Optional[str]:
+    global _proxy_cache
+    now = time.monotonic()
+    with _proxy_cache_lock:
+        if _proxy_cache and not force and now - _proxy_cache[0] < _PROXY_CACHE_TTL:
+            return _proxy_cache[1]
+        proxy = _discover_runtime_proxy()
+        _proxy_cache = (now, proxy)
+        return proxy
+
+
+def resolve_agy_environment(force: bool = False) -> dict[str, str]:
+    """Return the AGY environment with a current usable proxy when one is found."""
+    environment = dict(os.environ)
+    explicit = _first_proxy_value(environment, ("AGY_PROXY_URL", "PROXY_URL"))
+    inherited = _first_proxy_value(environment, _PROXY_ENV_NAMES)
+
+    proxy = explicit or inherited
+    if proxy and _is_local_proxy(proxy):
+        parsed = urlsplit(proxy)
+        detected = _probe_local_proxy_port(parsed.port or 0)
+        proxy = detected or _cached_runtime_proxy(force=force)
+    elif not proxy:
+        proxy = _cached_runtime_proxy(force=force)
+
+    if proxy:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            environment[name] = proxy
+            environment[name.lower()] = proxy
+    return environment
+
+
+def classify_agy_error(text: str, stderr: str = "") -> str:
+    """Classify an AGY failure for user-facing recovery guidance."""
+    detail = f"{text}\n{stderr}".lower()
+    if any(marker in detail for marker in _NETWORK_ERROR_MARKERS):
+        return "network"
+    if any(marker in detail for marker in _AUTH_ERROR_MARKERS):
+        return "authentication"
+    return "unknown"
+
+
+def describe_agy_failure(result: AgyResult) -> str:
+    detail = result.text or result.stderr or "agy returned no diagnostic output"
+    kind = classify_agy_error(result.text, result.stderr)
+    if kind == "network":
+        return (
+            "AGY_PROXY_ERROR: agy could not reach its network endpoint. "
+            "Check the local proxy or TUN mode before retrying. "
+            f"Original error: {detail}"
+        )
+    if kind == "authentication":
+        return (
+            "AGY_LOGIN_REQUIRED: agy authentication is required. "
+            "Run `agy` interactively through the working proxy, complete login, "
+            "then tell Codex to retry the task once. "
+            f"Original error: {detail}"
+        )
+    return f"AGY_FAILED: agy exited with code {result.exit_code}: {detail}"
+
+
 def run_agy(
     prompt: str,
     workdir: Optional[str] = None,
@@ -144,19 +359,22 @@ def run_agy(
             launch_workdir = None
             pty_workdir = None
 
-    direct = _run_subprocess(args, launch_workdir, timeout)
+    environment = resolve_agy_environment()
+    direct = _run_subprocess(args, launch_workdir, timeout, environment)
     direct_text = clean_agy_output(direct.stdout)
     direct_stderr = clean_agy_output(direct.stderr)
-    if direct_text:
+    if direct_text or direct.returncode != 0:
+        if classify_agy_error(direct_text, direct_stderr) == "network":
+            resolve_agy_environment(force=True)
         return AgyResult(
-            text=direct_text,
+            text=direct_text or direct_stderr or "agy returned no diagnostic output",
             exit_code=direct.returncode,
             used_pty=False,
             stderr=direct_stderr,
         )
 
     try:
-        pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout)
+        pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout, environment)
     except TimeoutError:
         raise
     except Exception as exc:  # noqa: BLE001 - preserve the direct failure context.
@@ -223,10 +441,12 @@ def run_agy_visible(
         launch_workdir = _windows_short_path(workdir)
 
     try:
+        environment = resolve_agy_environment()
         process = subprocess.Popen(
             args,
             cwd=launch_workdir,
             creationflags=0x00000010,  # CREATE_NEW_CONSOLE
+            env=environment,
         )
         exit_code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
@@ -239,8 +459,15 @@ def run_agy_visible(
     )
 
 
-def _run_subprocess(args: list[str], workdir: Optional[str], timeout: float) -> subprocess.CompletedProcess:
+def _run_subprocess(
+    args: list[str],
+    workdir: Optional[str],
+    timeout: float,
+    env: Optional[dict[str, str]] = None,
+) -> subprocess.CompletedProcess:
     kwargs: dict = {"cwd": workdir, "capture_output": True, "text": True, "timeout": timeout}
+    if env is not None:
+        kwargs["env"] = env
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
     try:
@@ -249,20 +476,30 @@ def _run_subprocess(args: list[str], workdir: Optional[str], timeout: float) -> 
         raise TimeoutError(f"agy timed out after {timeout}s") from exc
 
 
-def _run_with_pty(args: list[str], workdir: Optional[str], timeout: float) -> tuple[str, int]:
+def _run_with_pty(
+    args: list[str],
+    workdir: Optional[str],
+    timeout: float,
+    env: Optional[dict[str, str]] = None,
+) -> tuple[str, int]:
     """Run agy attached to a fresh pty so it believes stdout is a terminal."""
     if sys.platform == "win32":
-        return _run_with_conpty(args, workdir, timeout)
-    return _run_with_posix_pty(args, workdir, timeout)
+        return _run_with_conpty(args, workdir, timeout, env)
+    return _run_with_posix_pty(args, workdir, timeout, env)
 
 
-def _run_with_conpty(args: list[str], workdir: Optional[str], timeout: float) -> tuple[str, int]:
+def _run_with_conpty(
+    args: list[str],
+    workdir: Optional[str],
+    timeout: float,
+    env: Optional[dict[str, str]] = None,
+) -> tuple[str, int]:
     try:
         from pywinpty import PtyProcess  # type: ignore
     except ImportError:
         return "", -1
 
-    proc = PtyProcess.spawn(args, cwd=workdir)
+    proc = PtyProcess.spawn(args, cwd=workdir, env=env)
     chunks: list[str] = []
     deadline = time.monotonic() + timeout
     try:
@@ -285,7 +522,12 @@ def _run_with_conpty(args: list[str], workdir: Optional[str], timeout: float) ->
     return "".join(chunks), proc.exitstatus
 
 
-def _run_with_posix_pty(args: list[str], workdir: Optional[str], timeout: float) -> tuple[str, int]:
+def _run_with_posix_pty(
+    args: list[str],
+    workdir: Optional[str],
+    timeout: float,
+    env: Optional[dict[str, str]] = None,
+) -> tuple[str, int]:
     import pty
 
     master, slave = pty.openpty()
@@ -297,6 +539,7 @@ def _run_with_posix_pty(args: list[str], workdir: Optional[str], timeout: float)
             stderr=slave,
             cwd=workdir,
             close_fds=True,
+            env=env,
         )
     finally:
         os.close(slave)

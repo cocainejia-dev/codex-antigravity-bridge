@@ -10,7 +10,7 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from .agy_runner import AgyResult, run_agy, run_agy_visible
+from .agy_runner import AgyResult, classify_agy_error, describe_agy_failure, run_agy, run_agy_visible
 
 
 @dataclass
@@ -100,13 +100,17 @@ class AgyJobRegistry:
             return {"job_id": job_id, "state": "failed", "error": str(exc)}
 
         state = "completed" if result.exit_code == 0 else "failed"
-        return {
+        status = {
             "job_id": job_id,
             "state": state,
             "text": result.text,
             "exit_code": result.exit_code,
             "used_pty": result.used_pty,
         }
+        if state == "failed":
+            status["error_kind"] = classify_agy_error(result.text, result.stderr)
+            status["error"] = describe_agy_failure(result)
+        return status
 
     def cleanup(self) -> int:
         """Remove completed jobs older than the configured retention period."""

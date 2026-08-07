@@ -88,6 +88,16 @@ agy
 For the complete installation, proxy, tool, Windows, collaboration, and
 troubleshooting instructions, read the [runtime technical manual](mcp-antigravity-bridge/README.md).
 
+### Proxy and login behavior
+
+The installer detects environment variables, Windows system proxy settings, and common local listeners at install time. The bridge also checks the current proxy before each agy call. Runtime discovery is cached for about 60 seconds, with no background service or polling loop. After switching proxy software or TUN mode, the next call refreshes the runtime choice.
+
+Use `AGY_PROXY_URL`, `PROXY_URL`, or `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` for an explicit proxy. If automatic detection cannot find one, pass a complete address such as `http://127.0.0.1:7897` or `socks5://127.0.0.1:1080`.
+
+Changing proxies normally does not remove agy's stored login state. `AGY_PROXY_ERROR` means that the proxy or TUN path should be checked; only `AGY_LOGIN_REQUIRED` requires an interactive `agy` login through a working proxy. After login, tell Codex to retry; the original task is retried once by the upper orchestration layer.
+
+For manual Windows MCP configuration, use the absolute path to the real Python executable. Do not rely on a `python` command that may resolve to the Microsoft Store shim. The official installer resolves and writes the real path automatically.
+
 <a id="collaboration-rules"></a>
 
 ## Collaboration Rules

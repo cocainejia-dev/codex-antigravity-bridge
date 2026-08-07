@@ -3,9 +3,12 @@
 import subprocess
 import sys
 
+from codex_agy_bridge import agy_runner
 from codex_agy_bridge.agy_runner import (
+    classify_agy_error,
     clean_agy_output,
     find_agy,
+    resolve_agy_environment,
     run_agy,
     run_agy_visible,
 )
@@ -31,11 +34,114 @@ def test_find_agy_does_not_raise():
     find_agy()
 
 
+def test_resolve_agy_environment_prefers_explicit_proxy(monkeypatch):
+    for name in (
+        "AGY_PROXY_URL",
+        "PROXY_URL",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGY_PROXY_URL", "http://127.0.0.1:7892")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+
+    env = resolve_agy_environment(force=True)
+
+    assert env["HTTP_PROXY"] == "http://127.0.0.1:7892"
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:7892"
+    assert env["ALL_PROXY"] == "http://127.0.0.1:7892"
+
+
+def test_resolve_agy_environment_discovers_local_proxy(monkeypatch):
+    for name in (
+        "AGY_PROXY_URL",
+        "PROXY_URL",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(agy_runner.sys, "platform", "win32")
+    monkeypatch.setattr(agy_runner, "_windows_system_proxy", lambda: None)
+    monkeypatch.setattr(
+        agy_runner,
+        "_probe_local_proxy_port",
+        lambda port: "socks5://127.0.0.1:1080" if port == 1080 else None,
+    )
+
+    env = resolve_agy_environment(force=True)
+
+    assert env["ALL_PROXY"] == "socks5://127.0.0.1:1080"
+
+
+def test_resolve_agy_environment_caches_discovery(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        agy_runner,
+        "_discover_runtime_proxy",
+        lambda: calls.append(True) or "http://127.0.0.1:7892",
+    )
+    for name in (
+        "AGY_PROXY_URL",
+        "PROXY_URL",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    resolve_agy_environment(force=True)
+    resolve_agy_environment()
+
+    assert len(calls) == 1
+
+
+def test_resolve_agy_environment_refreshes_after_cache_expiry(monkeypatch):
+    calls = []
+    now = iter((100.0, 100.5, 102.0))
+    monkeypatch.setattr(agy_runner.time, "monotonic", lambda: next(now))
+    monkeypatch.setattr(agy_runner, "_PROXY_CACHE_TTL", 1.0)
+    monkeypatch.setattr(
+        agy_runner,
+        "_discover_runtime_proxy",
+        lambda: calls.append(True) or "http://127.0.0.1:7892",
+    )
+    for name in (
+        "AGY_PROXY_URL",
+        "PROXY_URL",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    resolve_agy_environment(force=True)
+    resolve_agy_environment()
+    resolve_agy_environment()
+
+    assert len(calls) == 2
+
+
+
 def test_run_agy_can_skip_headless_permission_prompts(monkeypatch):
     captured = {}
 
-    def fake_run(args, workdir, timeout):
+    def fake_run(args, workdir, timeout, env=None):
         captured["args"] = args
+        captured["env"] = env
         return subprocess.CompletedProcess(args, 0, "OK", "")
 
     monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
@@ -50,12 +156,13 @@ def test_run_agy_can_skip_headless_permission_prompts(monkeypatch):
 def test_run_agy_uses_ascii_workdir_alias_for_non_ascii_windows_workdir(monkeypatch):
     captured = {}
 
-    def fake_run(args, workdir, timeout):
+    def fake_run(args, workdir, timeout, env=None):
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    def fake_pty(args, workdir, timeout):
+    def fake_pty(args, workdir, timeout, env=None):
         captured["args"] = args
         captured["workdir"] = workdir
+        captured["env"] = env
         return "OK", 0
 
     monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
@@ -77,10 +184,10 @@ def test_run_agy_uses_ascii_workdir_alias_for_non_ascii_windows_workdir(monkeypa
 def test_run_agy_retries_when_direct_output_is_only_tui_chrome(monkeypatch):
     captured = {"pty_calls": 0}
 
-    def fake_run(args, workdir, timeout):
+    def fake_run(args, workdir, timeout, env=None):
         return subprocess.CompletedProcess(args, 0, "\x1b[?25l", "")
 
-    def fake_pty(args, workdir, timeout):
+    def fake_pty(args, workdir, timeout, env=None):
         captured["pty_calls"] += 1
         return "RECOVERED", 0
 
@@ -96,14 +203,14 @@ def test_run_agy_retries_when_direct_output_is_only_tui_chrome(monkeypatch):
 
 
 def test_run_agy_preserves_direct_stderr_when_pty_has_no_output(monkeypatch):
-    def fake_run(args, workdir, timeout):
+    def fake_run(args, workdir, timeout, env=None):
         return subprocess.CompletedProcess(args, 7, "", "authentication failed")
 
     monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
     monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
     monkeypatch.setattr(
         "codex_agy_bridge.agy_runner._run_with_pty",
-        lambda args, workdir, timeout: ("", -1),
+        lambda args, workdir, timeout, env=None: ("", -1),
     )
 
     result = run_agy("Say hi")
@@ -114,14 +221,14 @@ def test_run_agy_preserves_direct_stderr_when_pty_has_no_output(monkeypatch):
 
 
 def test_run_agy_classifies_empty_direct_and_pty_output_as_failure(monkeypatch):
-    def fake_run(args, workdir, timeout):
+    def fake_run(args, workdir, timeout, env=None):
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
     monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
     monkeypatch.setattr(
         "codex_agy_bridge.agy_runner._run_with_pty",
-        lambda args, workdir, timeout: ("", 0),
+        lambda args, workdir, timeout, env=None: ("", 0),
     )
 
     result = run_agy("Say hi")
@@ -138,14 +245,20 @@ def test_run_agy_visible_uses_a_new_console(monkeypatch):
             captured["timeout"] = timeout
             return 0
 
-    def fake_popen(args, cwd, creationflags):
+    def fake_popen(args, cwd, creationflags, env=None):
         captured["args"] = args
         captured["cwd"] = cwd
         captured["creationflags"] = creationflags
+        captured["env"] = env
         return FakeProcess()
 
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr(
+        agy_runner,
+        "resolve_agy_environment",
+        lambda force=False: {"HTTPS_PROXY": "http://127.0.0.1:7892"},
+    )
     monkeypatch.setattr("codex_agy_bridge.agy_runner.subprocess.Popen", fake_popen)
 
     result = run_agy_visible(
@@ -161,3 +274,31 @@ def test_run_agy_visible_uses_a_new_console(monkeypatch):
     assert captured["cwd"] == "C:\\work"
     assert captured["creationflags"] == 0x00000010
     assert captured["timeout"] == 12
+    assert captured["env"]["HTTPS_PROXY"] == "http://127.0.0.1:7892"
+
+
+def test_run_agy_passes_one_environment_to_direct_and_pty(monkeypatch):
+    captured = {}
+    expected_env = {"HTTP_PROXY": "http://127.0.0.1:7892"}
+
+    def fake_run(args, workdir, timeout, env=None):
+        captured["direct_env"] = env
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_pty(args, workdir, timeout, env=None):
+        captured["pty_env"] = env
+        return "OK", 0
+
+    monkeypatch.setattr(agy_runner, "find_agy", lambda: "agy")
+    monkeypatch.setattr(agy_runner, "resolve_agy_environment", lambda force=False: expected_env)
+    monkeypatch.setattr(agy_runner, "_run_subprocess", fake_run)
+    monkeypatch.setattr(agy_runner, "_run_with_pty", fake_pty)
+
+    assert run_agy("Say hi").text == "OK"
+    assert captured["direct_env"] is expected_env
+    assert captured["pty_env"] is expected_env
+
+
+def test_classify_agy_error_distinguishes_network_from_login():
+    assert classify_agy_error("token exchange failed: dial tcp 1.2.3.4:443") == "network"
+    assert classify_agy_error("OAuth token is invalid; login required") == "authentication"

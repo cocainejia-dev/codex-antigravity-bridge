@@ -76,7 +76,29 @@ def test_status_reports_nonzero_exit_as_failed(monkeypatch):
         "text": "agy failed",
         "exit_code": 1,
         "used_pty": False,
+        "error_kind": "unknown",
+        "error": "AGY_FAILED: agy exited with code 1: agy failed",
     }
+
+
+def test_status_reports_login_required_for_authentication_failure(monkeypatch):
+    def failed_run_agy(*args, **kwargs):
+        return AgyResult(text="authentication required", exit_code=1, used_pty=False)
+
+    monkeypatch.setattr("codex_agy_bridge.agy_jobs.run_agy", failed_run_agy)
+    registry = AgyJobRegistry()
+    try:
+        job_id = registry.start("Login test")
+        for _ in range(20):
+            status = registry.status(job_id)
+            if status["state"] == "failed":
+                break
+            time.sleep(0.01)
+
+        assert status["error_kind"] == "authentication"
+        assert status["error"].startswith("AGY_LOGIN_REQUIRED:")
+    finally:
+        registry.close()
 
 
 def test_completed_jobs_are_pruned_after_retention(monkeypatch):

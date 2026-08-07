@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .agy_collaboration import agy_collaborations
 from .agy_jobs import agy_jobs
-from .agy_runner import AgyResult, run_agy
+from .agy_runner import AgyResult, describe_agy_failure, run_agy
 
 mcp = FastMCP(
     "codex-agy-bridge",
@@ -31,8 +31,7 @@ mcp = FastMCP(
 
 def _require_success(result: AgyResult) -> AgyResult:
     if result.exit_code != 0:
-        detail = result.text or result.stderr or "agy returned no diagnostic output"
-        raise RuntimeError(f"agy exited with code {result.exit_code}: {detail}")
+        raise RuntimeError(describe_agy_failure(result))
     return result
 
 

@@ -26,7 +26,37 @@ def test_agy_ask_rejects_nonzero_exit(monkeypatch):
         ),
     )
 
-    with pytest.raises(RuntimeError, match="code 7.*authentication failed"):
+    with pytest.raises(RuntimeError, match="AGY_LOGIN_REQUIRED.*authentication failed"):
+        server.agy_ask("Say hi")
+
+
+def test_agy_ask_reports_proxy_failure_without_requesting_login(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "run_agy",
+        lambda *args, **kwargs: AgyResult(
+            text="token exchange failed: dial tcp 74.125.195.95:443",
+            exit_code=7,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="AGY_PROXY_ERROR") as exc_info:
+        server.agy_ask("Say hi")
+
+    assert "login" not in str(exc_info.value).lower()
+
+
+def test_agy_ask_reports_authentication_failure_as_login_required(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "run_agy",
+        lambda *args, **kwargs: AgyResult(
+            text="OAuth token invalid; authentication required",
+            exit_code=7,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="AGY_LOGIN_REQUIRED"):
         server.agy_ask("Say hi")
 
 
