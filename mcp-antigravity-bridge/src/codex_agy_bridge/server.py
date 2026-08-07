@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .agy_collaboration import agy_collaborations
 from .agy_jobs import agy_jobs
 from .agy_runner import AgyResult, run_agy
 
@@ -18,6 +20,9 @@ mcp = FastMCP(
         "use agy_ask_json when you want structured JSON output; "
         "use agy_start and agy_status for explicit asynchronous worktree collaboration "
         "with a caller-created isolated workdir. "
+        "Use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
+        "the bridge creates separate Git worktrees and starts bounded tasks, but "
+        "Codex reviews and merges branches manually. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
     ),
@@ -116,3 +121,43 @@ def agy_status(job_id: str) -> str:
     import json
 
     return json.dumps(agy_jobs.status(job_id), ensure_ascii=False)
+
+
+@mcp.tool()
+def agy_collab_start(
+    project_dir: str,
+    tasks: list[dict[str, Any]],
+    shared_contract: str = "",
+    base_ref: str = "HEAD",
+    worktree_root: str = "",
+    timeout: float = 900.0,
+    dangerously_skip_permissions: bool = False,
+    display_mode: str = "headless",
+    max_tasks: int = 4,
+) -> str:
+    """Start an explicit multi-task collaboration session.
+
+    ``tasks`` must contain objects with ``id``, ``prompt``, ``owned_paths``,
+    and ``acceptance`` fields. Each task receives its own Git worktree and
+    branch. ``display_mode='terminal'`` opens one visible Windows console per
+    task. ``max_tasks`` defaults to four and is a hard upper bound for this
+    session. The result is ready for manual review; this tool never merges.
+    """
+    result = agy_collaborations.start(
+        project_dir=project_dir,
+        tasks=tasks,
+        shared_contract=shared_contract,
+        base_ref=base_ref,
+        worktree_root=worktree_root,
+        timeout=timeout,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+        display_mode=display_mode,
+        max_tasks=max_tasks,
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def agy_collab_status(session_id: str) -> str:
+    """Return aggregated status for an MVP collaboration session."""
+    return json.dumps(agy_collaborations.status(session_id), ensure_ascii=False)

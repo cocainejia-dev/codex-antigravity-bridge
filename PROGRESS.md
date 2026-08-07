@@ -6,9 +6,16 @@
 
 <p>
   <img src="https://img.shields.io/badge/runtime-ready-16a34a?style=for-the-badge" alt="Runtime ready">
-  <img src="https://img.shields.io/badge/tests-37%20passed-2563EB?style=for-the-badge" alt="37 tests passed">
+  <img src="https://img.shields.io/badge/tests-46%20passed-2563EB?style=for-the-badge" alt="46 tests passed">
   <img src="https://img.shields.io/badge/CI-GitHub%20Actions-0ea5e9?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-111827?style=for-the-badge" alt="Apache 2.0 license">
+</p>
+
+<p>
+  <a href="README.md">中文项目首页</a> ·
+  <a href="README.en.md">English project overview</a> ·
+  <a href="PROGRESS.en.md">English progress</a> ·
+  <a href="docs/README.md">文档索引</a>
 </p>
 
 </div>
@@ -34,6 +41,44 @@ agy -p "..."
 Antigravity agent
 ```
 
+## 🧭 运行模式 · Runtime Modes
+
+当前共有 **4 种运行模式**。`headless` 与 `terminal` 是显示方式，监督模式
+是 Codex 的安全与验收规则，不分别计作新的运行模式。
+
+| # | 中文模式 | English mode | 入口 / Entry point | 并发与行为 / Concurrency and behavior |
+| :---: | --- | --- | --- | --- |
+| 1 | Codex 普通开发 | Normal Codex development | 不调用 agy / No agy tool | Codex 独立完成，不会自动委派。 |
+| 2 | 单次同步委派 | Synchronous delegation | `agy_ask`、`agy_ask_json` | 一次处理一个任务，Codex 等待返回。 |
+| 3 | 异步独立任务 | Async isolated task | `agy_start`、`agy_status` | 一个 job 对应一个 agy 进程，Codex 可继续开发。 |
+| 4 | 协同开发 MVP | Collaboration MVP | `agy_collab_start`、`agy_collab_status` | 默认 1 个任务，最多 4 个；每个任务独立分支和 worktree。 |
+
+### 显示方式 · Display Options
+
+| 显示方式 / Display mode | 默认 / Default | 说明 / Behavior | 平台 / Platform |
+| --- | :---: | --- | --- |
+| `headless` | ✅ | 不弹窗，通过 MCP 返回状态和最终结果。 / No window; status and final output return through MCP. | Windows、macOS、Linux |
+| `terminal` | 关闭 / Off | 每个运行中的任务打开一个可见终端并显示 agy 实时输出。 / One visible console per task with live agy output. | Windows |
+
+### 协同生命周期 · Collaboration Lifecycle
+
+```text
+用户确认显示方式和任务数量
+        ↓
+Codex 拆分任务，定义共享契约和互斥文件范围
+        ↓
+创建独立分支与 worktree，启动 agy 进程
+        ↓
+Codex 在自己的工作区继续开发，轮询协同状态
+        ↓
+检查 diff、未提交改动、测试和验收标准
+        ↓
+人工确认后合并；桥接器不会自动合并
+```
+
+`ready_for_review` 只表示 agy 进程成功退出，不表示功能验收已经通过。
+终端显示不会改变权限、worktree 隔离、分支和人工验收规则。
+
 ## 📦 交付状态 · Delivery Status
 
 | 中文区域 | English area | 状态 / Status | 说明 / Notes |
@@ -41,6 +86,8 @@ Antigravity agent
 | 命令行桥接运行时 | CLI bridge runtime | ✅ 已完成 / Done | `mcp-antigravity-bridge/` 提供本地 MCP 运行时。 |
 | 同步 MCP 工具 | Synchronous MCP tools | ✅ 已完成 / Done | `agy_ask`、`agy_ask_json`。 |
 | 异步工作区工具 | Async worktree tools | ✅ 已完成 / Done | `agy_start`、`agy_status`。 |
+| 协同开发 MVP | Collaboration MVP | ✅ 已完成 / Done | `agy_collab_start`、`agy_collab_status` 自动创建隔离 worktree 并汇总状态，不自动合并。 |
+| 实时终端模式 | Live terminal mode | ✅ 已完成 / Done | 可选 Windows 可见终端、每任务一个窗口；默认仍为无界面模式。 |
 | Windows 路径与终端 | Windows paths and PTY | ✅ 已完成 / Done | 非 ASCII 工作目录与 ConPTY 回退。 |
 | 监督技能 | Supervisor skill | ✅ 已完成 / Done | 授权、权限、状态机和纠正规则。 |
 | 安装与代理配置 | Install and proxy setup | ✅ 已完成 / Done | Python 路径修复、代理探测与 MCP 配置写入。 |
@@ -56,6 +103,9 @@ Antigravity agent
 - MCP 权限提示已明确要求用户对指定工作区和任务进行授权后才能启用权限绕过。
 - 安装器现在会自动探测代理；无法识别时支持 `-ProxyUrl`，不会假设统一端口。
 - runner、同步工具和异步任务都会保留失败原因，不再把空输出误报为成功。
+- 新增协同开发 MVP：校验共享契约与互斥文件边界，创建临时分支和 worktree，并并行启动多个 agy 任务。
+- 新增可选实时终端模式：用户确认后按任务打开可见 Windows 终端，默认不弹窗。
+- 协同启动前询问显示方式和任务数量，默认 1 个任务，硬上限 4 个。
 
 ## ✅ 已完成 · Completed
 
@@ -72,6 +122,9 @@ Antigravity agent
 - 提供 `agy_ask` 普通文本调用。
 - 提供 `agy_ask_json` 结构化输出调用。
 - 提供 `agy_start` / `agy_status` 异步工作区调用。
+- 提供 `agy_collab_start` / `agy_collab_status` 协同开发调用。
+- 协同会话返回任务状态、分支、worktree、改动文件、未提交改动和 `diff_check`，验收与合并仍由 Codex 手动完成。
+- 终端模式使用独立可见控制台承载每个 agy 进程，退出码仍由协同状态接口汇总。
 - 支持通过 `AGY_PATH`、`PATH` 和平台默认位置发现 `agy`。
 - 支持 Windows 非 ASCII 工作目录。
 - 直接标准输出为空时，回退到 Windows ConPTY 或 POSIX `pty`。
@@ -101,17 +154,33 @@ Antigravity agent
 
 ### 🧭 Architecture
 
-Codex plans and reviews through local MCP stdio. The bridge starts `agy -p` as a bounded subprocess, cleans terminal output, and supports both synchronous calls and explicit asynchronous worktree jobs.
+Codex plans and reviews through local MCP stdio. The bridge starts `agy -p` as a bounded subprocess, cleans terminal output, and supports synchronous calls, explicit asynchronous worktree jobs, and an opt-in collaboration MVP.
 
 ### 📦 Delivered
 
-- Four MCP tools: `agy_ask`, `agy_ask_json`, `agy_start`, and `agy_status`.
+- Six MCP tools: `agy_ask`, `agy_ask_json`, `agy_start`, `agy_status`, `agy_collab_start`, and `agy_collab_status`.
+- Collaboration MVP: validate exclusive task paths, create temporary Git worktrees, start parallel jobs, and aggregate review metadata without auto-merging.
+- Optional live terminal mode: ask for consent before opening one visible Windows console per task; default to one headless task and cap sessions at four tasks.
 - Windows non-ASCII workdir support with ConPTY fallback.
 - Direct stderr, nonzero exits, PTY failures, and empty-output diagnostics are preserved.
 - Completed async jobs are retained for a finite period and the worker pool has an explicit shutdown path.
 - Windows installation resolves a real Python executable, detects common proxy configurations, and writes per-user MCP environment values.
 - POSIX installation accepts `PROXY_URL` and mirrors the per-user MCP configuration behavior.
 - CI runs repository tests, bridge tests, the real MCP stdio smoke test, skill validation, and compilation checks.
+
+### 🧭 Runtime Modes
+
+The project has four runtime modes:
+
+1. **Normal Codex development**: Codex works alone and does not invoke agy automatically.
+2. **Synchronous delegation**: `agy_ask` or `agy_ask_json` handles one bounded task while Codex waits.
+3. **Async isolated task**: `agy_start` and `agy_status` run one agy task in a caller-created worktree while Codex continues.
+4. **Collaboration MVP**: `agy_collab_start` and `agy_collab_status` run one to four independently scoped tasks, each with its own branch and worktree.
+
+`headless` is the default display mode. On Windows, the opt-in `terminal` display
+mode opens one visible console per running task and shows agy's live output. The
+display option does not change the runtime mode, task isolation, or acceptance
+responsibility.
 
 ### 🔒 Safety Boundary
 
@@ -133,12 +202,12 @@ python scripts/validate_skill.py
 git diff --check
 ```
 
-Latest verification: root tests 17 passed; bridge tests 19 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
+Latest verification: repository tests 46 passed in total; root tests 19 passed; bridge tests 27 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
 
 当前结果：
 
-- 根测试：17 passed。
-- bridge 测试：19 passed，包含真实 MCP stdio 工具清单测试。
+- 仓库总测试：46 passed；根测试：19 passed。
+- bridge 测试：27 passed，包含真实 MCP stdio 工具清单测试。
 - skill validator：skill validation passed。
 - README Markdown 代码围栏：已检查为真实反引号，围栏成对闭合。
 - CI 配置：已覆盖 Windows 与 Ubuntu、多版本 Python、根测试和 bridge 测试。
@@ -161,6 +230,8 @@ bridge 测试与编译检查均通过。单元测试 mock 进程边界，不需�
 - 不自动委托生产操作、不可逆操作、跨项目写入或范围不明任务。
 - `dangerously_skip_permissions` 默认关闭。
 - 异步 job 状态保存在当前 bridge 进程内；进程重启后旧 job id 会变成 `unknown`。
+- 协同会话最多 4 个任务；每个任务使用一个独立 agy 进程、分支和 worktree。
+- `terminal` 显示方式当前只支持 Windows，并且每个运行任务打开一个可见控制台。
 - 当前没有发布到 PyPI 的版本化流程。
 
 ## 🛣️ 下一步路线 · Roadmap
@@ -184,13 +255,19 @@ bridge 测试与编译检查均通过。单元测试 mock 进程边界，不需�
 | 文件 | 作用 |
 | --- | --- |
 | `mcp-antigravity-bridge/src/codex_agy_bridge/` | MCP bridge runtime |
+| `README.md` | 中文项目入口 |
+| `README.en.md` | English project entry point |
+| `PROGRESS.md` | 当前中文进度 |
+| `PROGRESS.en.md` | English project progress |
+| `docs/README.md` | 中文文档索引 |
+| `docs/README.en.md` | English documentation index |
+| `mcp-antigravity-bridge/README.md` | 运行时技术手册 / Runtime technical manual |
 | `skills/agy-supervisor/SKILL.md` | Supervisor 行为规则 |
 | `skills/agy-supervisor/references/` | 状态机、计划和协议参考 |
 | `scripts/install.ps1` | Windows 安装器 |
 | `scripts/install.sh` | POSIX 安装器 |
 | `scripts/validate_skill.py` | skill package 验证器 |
 | `tests/` | skill、分发与压力场景测试 |
-| `PROGRESS.md` | 当前中文进度 |
 
 ## 🔗 参考资料 · References
 

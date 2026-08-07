@@ -10,7 +10,7 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from .agy_runner import AgyResult, run_agy
+from .agy_runner import AgyResult, run_agy, run_agy_visible
 
 
 @dataclass
@@ -58,14 +58,18 @@ class AgyJobRegistry:
         timeout: float = 300.0,
         output_format: str | None = None,
         dangerously_skip_permissions: bool = False,
+        display_mode: str = "headless",
     ) -> str:
+        if display_mode not in {"headless", "terminal"}:
+            raise ValueError("display_mode must be 'headless' or 'terminal'")
         job_id = uuid4().hex
         with self._lock:
             if self._closed:
                 raise RuntimeError("agy job registry is closed")
             self._prune_locked()
+            runner = run_agy_visible if display_mode == "terminal" else run_agy
             future = self._executor.submit(
-                run_agy,
+                runner,
                 prompt,
                 workdir,
                 timeout,

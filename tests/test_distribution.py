@@ -17,6 +17,10 @@ def test_distribution_files_exist() -> None:
         ROOT / "scripts" / "install.ps1",
         ROOT / "scripts" / "install.sh",
         ROOT / "scripts" / "validate_skill.py",
+        ROOT / "README.en.md",
+        ROOT / "PROGRESS.en.md",
+        ROOT / "docs" / "README.md",
+        ROOT / "docs" / "README.en.md",
     )
     assert all(path.is_file() for path in expected)
 
@@ -60,8 +64,56 @@ def test_readme_documents_install_and_supervision() -> None:
         "监督模式",
         "多页面协同",
         "docs/agy-plans",
+        "README.en.md",
+        "PROGRESS.en.md",
+        "docs/README.md",
     ):
         assert phrase in readme
+
+
+def test_readmes_document_all_runtime_modes() -> None:
+    chinese = (ROOT / "README.md").read_text(encoding="utf-8")
+    english = (ROOT / "README.en.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "模式总览",
+        "Codex 普通开发",
+        "单次同步委派",
+        "异步独立任务",
+        "协同开发 MVP",
+        "headless",
+        "terminal",
+        "最多 4 个任务",
+    ):
+        assert phrase in chinese
+
+    for phrase in (
+        "Runtime Modes",
+        "Normal Codex development",
+        "Synchronous delegation",
+        "Async isolated task",
+        "Collaboration MVP",
+        "headless",
+        "terminal",
+        "four tasks",
+    ):
+        assert phrase in english
+
+
+def test_progress_documents_runtime_modes_and_lifecycle() -> None:
+    progress = (ROOT / "PROGRESS.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "运行模式 · Runtime Modes",
+        "Codex 普通开发",
+        "Synchronous delegation",
+        "协同开发 MVP",
+        "显示方式 · Display Options",
+        "协同生命周期 · Collaboration Lifecycle",
+        "ready_for_review",
+        "最多 4 个任务",
+    ):
+        assert phrase in progress
 
 
 def test_installers_support_per_user_proxy_configuration() -> None:

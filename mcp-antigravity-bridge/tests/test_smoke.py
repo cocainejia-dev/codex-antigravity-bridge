@@ -3,7 +3,12 @@
 import subprocess
 import sys
 
-from codex_agy_bridge.agy_runner import clean_agy_output, find_agy, run_agy
+from codex_agy_bridge.agy_runner import (
+    clean_agy_output,
+    find_agy,
+    run_agy,
+    run_agy_visible,
+)
 
 
 def test_clean_agy_output_removes_ansi():
@@ -123,3 +128,36 @@ def test_run_agy_classifies_empty_direct_and_pty_output_as_failure(monkeypatch):
 
     assert result.exit_code == -1
     assert "no output" in result.text
+
+
+def test_run_agy_visible_uses_a_new_console(monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        def wait(self, timeout):
+            captured["timeout"] = timeout
+            return 0
+
+    def fake_popen(args, cwd, creationflags):
+        captured["args"] = args
+        captured["cwd"] = cwd
+        captured["creationflags"] = creationflags
+        return FakeProcess()
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.subprocess.Popen", fake_popen)
+
+    result = run_agy_visible(
+        "Say hi",
+        workdir="C:\\work",
+        timeout=12,
+        dangerously_skip_permissions=True,
+    )
+
+    assert result.exit_code == 0
+    assert "terminal" in result.text
+    assert captured["args"][-1] == "--dangerously-skip-permissions"
+    assert captured["cwd"] == "C:\\work"
+    assert captured["creationflags"] == 0x00000010
+    assert captured["timeout"] == 12

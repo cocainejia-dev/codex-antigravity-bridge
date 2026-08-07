@@ -155,6 +155,42 @@ unavailable. Do not parallelize unresolved shared state, routing, authentication
 database, production operations, secrets, irreversible actions, concurrent
 writes in one worktree, or unknown workdirs.
 
+## Collaboration MVP Mode
+
+The bridge also exposes `agy_collab_start` and `agy_collab_status` for a small
+explicit collaboration session. Use it only after the user has opted into
+Codex/AGY parallel development.
+
+The start request must contain:
+
+```text
+project_dir: absolute Git repository root
+shared_contract: routes, fields, state, and other shared agreements
+tasks: one or more tasks with id, prompt, owned_paths, acceptance, and optional verification
+base_ref: the committed baseline, normally HEAD
+display_mode: headless (default) or terminal (Windows only)
+max_tasks: user-approved session limit, from 1 through 4
+```
+
+The bridge validates that task ids are unique, owned paths are relative, and
+owned paths do not overlap. It creates one temporary branch and worktree per
+task outside the project directory, then starts the same bounded AGY jobs used
+by `agy_start`. It does not copy uncommitted Codex changes into those worktrees.
+
+Before calling `agy_collab_start`, ask once whether the user wants visible
+terminal output and how many tasks to dispatch. Default to headless mode and
+one task; reject any count above four. In terminal mode, one visible Windows
+console is opened per task and agy output is shown live, while job status still
+tracks exit codes.
+
+`agy_collab_status` reports `running`, `failed`, or `ready_for_review` for the
+session and includes each task's branch, worktree, job result, changed files,
+uncommitted changes, and `diff_check`. `ready_for_review` is not an acceptance
+result. Codex must inspect the branches and run the declared checks before a
+manual merge. The MVP never auto-merges, deletes worktrees, or executes
+arbitrary verification commands. A bridge restart makes the in-memory session
+unavailable; preserve the returned worktrees and inspect them manually.
+
 ## Pressure Scenario Verification
 
 The repository tests are contract checks, not proof that a language model obeys

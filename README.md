@@ -15,9 +15,11 @@
 
 <p>
   <a href="#快速开始">快速开始</a> ·
-  <a href="#四个工具">工具</a> ·
+  <a href="#模式总览">模式总览</a> ·
+  <a href="#六个工具">工具</a> ·
   <a href="#监督模式">监督模式</a> ·
-  <a href="mcp-antigravity-bridge/README.md">英文技术手册</a>
+  <a href="README.en.md">英文项目首页</a> ·
+  <a href="docs/README.md">文档索引</a>
 </p>
 
 </div>
@@ -38,6 +40,50 @@ flowchart LR
     A --> G[Antigravity 执行器]
 ```
 
+## 🧭 模式总览
+
+这个项目有 **4 种运行模式**。`headless` 和 `terminal` 是显示方式，
+不是额外的开发模式；`监督模式` 是 Codex 的安全与验收规则，也不是另一
+个 agy 进程模式。
+
+| 模式 | 使用入口 | 任务数量 | Codex 是否继续写代码 | worktree 要求 | 适用场景 |
+| --- | --- | :---: | :---: | --- | --- |
+| ① Codex 普通开发 | 不调用 agy | 0 | 是 | 当前工作区 | 只让 Codex 完成任务；不会自动调用 agy |
+| ② 单次同步委派 | `agy_ask` / `agy_ask_json` | 1 | 否，等待返回 | 调用方指定或继承当前目录 | 一次性分析、只读检查、结构化回答 |
+| ③ 异步独立任务 | `agy_start` + `agy_status` | 每个 job 1 个 | 是 | 调用方提前创建独立 worktree | Codex 与一个 agy 任务并行工作 |
+| ④ 协同开发 MVP | `agy_collab_start` + `agy_collab_status` | 默认 1，最多 4 | 是 | 桥接器为每个任务自动创建独立 worktree | 前端、后端、测试等互斥分工并行开发 |
+
+### 显示方式
+
+| 显示方式 | 默认值 | 行为 | 平台 |
+| --- | :---: | --- | --- |
+| `headless` | ✅ | 不弹出窗口；通过 MCP 返回任务状态和最终结果 | Windows、macOS、Linux |
+| `terminal` | 关闭 | 每个运行中的任务打开一个可见终端窗口，实时显示 agy 输出 | Windows |
+
+实时终端是 **协同开发模式的可选显示方式**，不是第五种任务模式。它不会
+改变任务隔离、分支、worktree、权限和验收规则。当前实现使用可见 Windows
+控制台；如果系统把 Windows Terminal 设为默认终端，它可能由 Windows
+Terminal 承载，否则会使用系统控制台窗口。
+
+### 监督规则
+
+- 普通开发模式不会自动调用 agy。
+- 用户明确要求协同或委派后，Codex 才能启动 agy。
+- Codex 负责拆分任务、定义共享契约、检查文件边界、运行测试和手动合并。
+- 协同模式最多 4 个任务；每个任务对应一个独立 agy 进程、分支和 worktree。
+- `ready_for_review` 只表示 agy 进程成功退出，不表示功能验收通过。
+- 桥接器不会自动合并、删除 worktree，也不会执行任务声明的任意命令。
+
+### 如何选择
+
+```text
+只需要 Codex                 → Codex 普通开发
+只需要 agy 返回一次结果        → agy_ask / agy_ask_json
+Codex 继续写，agy 做一个任务    → agy_start + agy_status
+Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
+想看 agy 实时输出              → 协同模式 + display_mode="terminal"
+```
+
 这个项目的核心取舍很简单：**让 Codex 保持监督权，让 `agy` 只做清晰、可回滚、可验收的子任务。**
 
 ## ✨ 为什么值得用
@@ -47,7 +93,7 @@ flowchart LR
 <td width="25%"><strong>原生接入</strong><br><sub>注册为 MCP 服务器，Codex 桌面版和命令行都能直接调用。</sub></td>
 <td width="25%"><strong>命令行优先</strong><br><sub>复用 `agy` 自己的登录、工作区和权限流程。</sub></td>
 <td width="25%"><strong>Windows 友好</strong><br><sub>支持中文路径，并在空输出时尝试 ConPTY 回退。</sub></td>
-<td width="25%"><strong>小而清楚</strong><br><sub>本地 stdio、四个工具，没有网页服务器和数据库。</sub></td>
+<td width="25%"><strong>小而清楚</strong><br><sub>本地 stdio、六个工具，没有网页服务器和数据库。</sub></td>
 </tr>
 </table>
 
@@ -102,7 +148,7 @@ codex mcp list
 
 看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，就可以在 Codex 中使用它。
 
-## 🧰 四个工具
+## 🧰 六个工具
 
 | 工具 | 作用 | 返回 |
 | --- | --- | --- |
@@ -110,6 +156,56 @@ codex mcp list
 | `agy_ask_json` | 请求结构化 CLI 输出，并拒绝非法 JSON | JSON 输出文本 |
 | `agy_start` | 在调用方提供的独立 worktree 中异步启动任务 | `job_id` |
 | `agy_status` | 查询异步任务 | 状态与结果 JSON |
+| `agy_collab_start` | 按任务契约自动创建 worktree 并并行启动任务 | 协同会话 JSON |
+| `agy_collab_status` | 汇总任务、工作区和差异状态 | 协同会话 JSON |
+
+## 🤝 协同开发模式 MVP
+
+这个模式适合“Codex 写后端、agy 写前端”这类可以明确分区的任务。它会
+自动创建独立 Git worktree 和临时分支，然后并行启动多个 `agy` 任务；Codex
+可以继续在自己的工作区写代码。
+
+每个任务必须提供 `id`、`prompt`、`owned_paths` 和 `acceptance`。任务之间的
+`owned_paths` 不能重叠。`shared_contract` 用来记录接口、字段和路由等共享
+约定，避免前后端各自猜测。
+
+协同启动前，Codex 会先询问是否打开实时终端，以及本次派几个任务给 `agy`。
+默认不打开实时终端、只派 1 个任务；最多允许 4 个任务。选择实时模式后，
+Windows 会为每个运行中的任务打开一个可见终端窗口，用户可以直接看到 `agy`
+的执行过程。
+
+```text
+agy_collab_start(
+  project_dir="C:/work/my-app",
+  shared_contract="前端调用 GET /api/items，返回 id、name 字段。",
+  display_mode="headless",
+  max_tasks=4,
+  tasks=[
+    {
+      "id": "backend",
+      "role": "后端",
+      "prompt": "实现 items API 和后端测试。",
+      "owned_paths": ["backend"],
+      "acceptance": ["后端测试通过"],
+      "verification": ["python -m pytest backend"],
+    },
+    {
+      "id": "frontend",
+      "role": "前端",
+      "prompt": "根据共享契约实现 items 页面。",
+      "owned_paths": ["frontend"],
+      "acceptance": ["前端测试通过"],
+    },
+  ],
+)
+```
+
+使用 `agy_collab_status(session_id)` 查看每个任务的状态、分支、worktree、
+改动文件、未提交改动和 `diff_check` 结果。`ready_for_review` 只表示 agy
+进程成功退出，不代表验收标准已经通过。
+
+这个 MVP 不会自动合并、删除 worktree，也不会自动执行任务提供的命令。Codex
+仍然需要检查差异、运行验收测试，并在确认后手动合并分支。
 
 常用的只读请求：
 
@@ -242,13 +338,15 @@ git diff --check
 
 ```text
 .
-├── mcp-antigravity-bridge/       # 本地 MCP runtime
+├── mcp-antigravity-bridge/       # 本地 MCP runtime 与技术手册
 ├── skills/agy-supervisor/        # Codex supervisor skill
 ├── scripts/                      # 安装与验证脚本
 ├── tests/                        # skill 与分发回归测试
-├── docs/superpowers/             # 设计与执行记录
+├── docs/                         # 双语文档索引与设计记录
 ├── research/                     # 研究资料与历史比较
 ├── PROGRESS.md
+├── PROGRESS.en.md
+├── README.en.md
 ├── LICENSE
 └── README.md
 ```
@@ -257,10 +355,14 @@ git diff --check
 
 | 想了解 | 从这里开始 |
 | --- | --- |
-| 安装、工具、运行机制和排错 | [英文桥接器技术手册](mcp-antigravity-bridge/README.md) |
+| 中文项目介绍、模式和快速开始 | [中文项目首页](README.md) |
+| English project overview | [README.en.md](README.en.md) |
+| 安装、工具、运行机制和排错 | [运行时技术手册](mcp-antigravity-bridge/README.md) |
+| 文档目录和文件分层 | [文档索引](docs/README.md) · [English index](docs/README.en.md) |
 | 委派规则和验收协议 | [Supervisor skill](skills/agy-supervisor/SKILL.md) |
 | 分发与 skill 验证 | [validate_skill.py](scripts/validate_skill.py) |
-| 项目进度 | [PROGRESS.md](PROGRESS.md) |
+| 中文项目进度 | [PROGRESS.md](PROGRESS.md) |
+| English project progress | [PROGRESS.en.md](PROGRESS.en.md) |
 
 ## 🔗 参考资料
 

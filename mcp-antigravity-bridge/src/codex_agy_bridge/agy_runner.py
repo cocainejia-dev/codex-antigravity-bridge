@@ -190,6 +190,55 @@ def run_agy(
     )
 
 
+def run_agy_visible(
+    prompt: str,
+    workdir: Optional[str] = None,
+    timeout: float = 300.0,
+    output_format: Optional[str] = None,
+    dangerously_skip_permissions: bool = False,
+) -> AgyResult:
+    """Run agy in a visible Windows console and wait for its exit code.
+
+    The console inherits agy's live terminal output. Output is intentionally
+    not captured here because the user is watching the terminal; the job
+    status still records the exit code and a short handoff message.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("visible terminal mode is currently supported on Windows only")
+
+    binary = find_agy()
+    if binary is None:
+        raise FileNotFoundError(
+            "agy binary not found. Install it or set AGY_PATH before using terminal mode."
+        )
+
+    args = [binary, "-p", prompt]
+    if output_format:
+        args += ["--output-format", output_format]
+    if dangerously_skip_permissions:
+        args += ["--dangerously-skip-permissions"]
+
+    launch_workdir = workdir
+    if workdir and not workdir.isascii():
+        launch_workdir = _windows_short_path(workdir)
+
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=launch_workdir,
+            creationflags=0x00000010,  # CREATE_NEW_CONSOLE
+        )
+        exit_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        raise TimeoutError(f"agy timed out after {timeout}s") from exc
+
+    return AgyResult(
+        text="Live agy output was shown in a separate terminal window.",
+        exit_code=exit_code,
+    )
+
+
 def _run_subprocess(args: list[str], workdir: Optional[str], timeout: float) -> subprocess.CompletedProcess:
     kwargs: dict = {"cwd": workdir, "capture_output": True, "text": True, "timeout": timeout}
     if sys.platform == "win32":

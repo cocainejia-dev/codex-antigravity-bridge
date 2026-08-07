@@ -1,0 +1,48 @@
+# Documentation Index
+
+This is the unified documentation entry point. Project overviews, progress
+records, runtime instructions, and internal design history have separate homes
+so that user guidance is not mixed with implementation records.
+
+## Start Here
+
+| Need | Start here |
+| --- | --- |
+| Chinese overview, installation, and mode selection | [Project overview](../README.md) |
+| English overview, installation, and mode selection | [README.en.md](../README.en.md) |
+| Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
+| English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
+| Installation, proxy, MCP tools, and troubleshooting | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
+| AGY collaboration rules and safety boundaries | [agy-supervisor skill](../skills/agy-supervisor/SKILL.md) |
+| Research notes | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
+
+## Technical Documentation Layout
+
+### Runtime documentation
+
+`mcp-antigravity-bridge/README.md` is the technical manual for the Python MCP
+package. It stays beside `pyproject.toml`, `src/`, and `tests/` so package
+developers can find installation and runtime details in one place. It is not the
+project landing page; start with the root `README.md` or `README.en.md` instead.
+
+### Design and execution history
+
+- [`docs/superpowers/specs/`](superpowers/specs/) contains design decisions and specifications.
+- [`docs/superpowers/plans/`](superpowers/plans/) contains implementation plans and execution records.
+
+These files preserve project history and are not the first reading path for new
+users.
+
+### Skills and protocols
+
+- [`skills/agy-supervisor/SKILL.md`](../skills/agy-supervisor/SKILL.md) defines when and how Codex may call agy.
+- [`skills/agy-supervisor/references/`](../skills/agy-supervisor/references/) contains task contracts, state machines, worktree rules, and correction protocols.
+
+## Naming Convention
+
+- `README.md`: Chinese project entry point.
+- `README.en.md`: English project entry point.
+- `PROGRESS.md`: Chinese project progress.
+- `PROGRESS.en.md`: English project progress.
+- `mcp-antigravity-bridge/README.md`: package-level runtime technical manual.
+- `docs/`: documentation indexes, design history, and long-lived reference material.

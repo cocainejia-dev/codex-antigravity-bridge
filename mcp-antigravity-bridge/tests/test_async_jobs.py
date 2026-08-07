@@ -108,3 +108,25 @@ def test_closed_registry_rejects_new_jobs(monkeypatch):
 
     with pytest.raises(RuntimeError, match="closed"):
         registry.start("Implement page")
+
+
+def test_terminal_display_selects_visible_runner(monkeypatch):
+    calls = []
+
+    def fake_visible_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return AgyResult(text="shown", exit_code=0, used_pty=False)
+
+    monkeypatch.setattr("codex_agy_bridge.agy_jobs.run_agy_visible", fake_visible_run)
+    registry = AgyJobRegistry()
+    try:
+        job_id = registry.start("Show task", display_mode="terminal")
+        for _ in range(20):
+            status = registry.status(job_id)
+            if status["state"] == "completed":
+                break
+            time.sleep(0.01)
+        assert status["text"] == "shown"
+        assert calls
+    finally:
+        registry.close()
