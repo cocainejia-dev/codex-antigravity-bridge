@@ -61,6 +61,10 @@ agy --version
 
 ## 📦 Installation
 
+For the fastest GitHub setup, run the repository installer from the root
+README. It installs this bridge, the `agy-supervisor` skill, and an idempotent
+Codex MCP registration in one step.
+
 From this repository:
 
 ```powershell
@@ -75,6 +79,10 @@ python -m pip install -e ".[dev]"
 ```
 
 The `dev` extra installs the local pytest dependency. The `winpty` extra enables the Windows ConPTY fallback.
+
+The installer does not install or manage Antigravity OAuth credentials. Run
+`agy` interactively once after installation and let the CLI manage its own
+login state.
 
 ## 🔌 Register with Codex
 
@@ -137,6 +145,20 @@ Use it when the prompt asks Antigravity for structured output. Internally this a
 | `workdir` | Optional working directory for the `agy` process. An empty string inherits the current directory. |
 | `timeout` | Hard wall-clock timeout in seconds. The default is `300.0`. |
 | `dangerously_skip_permissions` | Adds `--dangerously-skip-permissions` when `true`; keep it `false` unless the prompt and workdir are trusted. |
+
+## 🧭 Supervisor skill
+
+The optional `agy-supervisor` skill makes Codex the supervisor and Antigravity
+the bounded implementer. It is intentionally opt-in: ordinary development
+requests do not call `agy`. Codex calls `agy_ask` only after the user explicitly
+requests Antigravity collaboration or enables supervisor mode.
+
+For multi-page work, Codex first fixes the shared contracts, assigns exclusive
+file boundaries, delegates pages sequentially in one workdir, and checks each
+diff and test result. A task has at most three total calls, including two
+correction calls after the initial implementation. The skill does not enable
+concurrent writes, production operations, secret handling, or irreversible
+actions.
 
 ## 🧭 How the runner works
 

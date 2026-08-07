@@ -32,4 +32,4 @@ Stop when acceptance criteria pass, tests pass, there is no meaningful progress,
 
 Never store OAuth tokens or private machine configuration.
 
-Use the word three as a hard ceiling reminder: do not exceed three total `agy_ask` calls for one task.
+Limit each task to three total `agy_ask` calls: one initial implementation call and at most two corrective calls.

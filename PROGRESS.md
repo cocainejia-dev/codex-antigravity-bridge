@@ -41,12 +41,15 @@ Antigravity agent
 - Added local unit tests and compile checks.
 - Verified a Codex tool call can delegate a small task to Antigravity through the bridge.
 - Removed the unused in-process integration prototype so the repository has one supported runtime path.
+- Added the `agy-supervisor` skill with explicit opt-in, bounded delegation, and multi-page supervision rules.
+- Added Windows and POSIX installers that install the bridge, copy the skill, and register MCP idempotently.
+- Added GitHub quick-start documentation and distribution validation tests.
 
 ## Remaining Work
 
 ### High Priority
 
-- Add CI for the bridge test suite.
+- Add CI for the bridge and distribution test suites.
 - Publish a versioned package when the command and configuration surface stabilize.
 
 ### Medium Priority
