@@ -1,0 +1,4 @@
+interface:
+  display_name: AGY Supervisor
+  short_description: Let Codex supervise bounded Antigravity coding tasks.
+  default_prompt: Use AGY Supervisor mode for this explicitly delegated coding task.
