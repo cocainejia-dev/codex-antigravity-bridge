@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,23 @@ def test_distribution_files_exist() -> None:
         ROOT / "scripts" / "validate_skill.py",
     )
     assert all(path.is_file() for path in expected)
+
+
+def test_skill_metadata_declares_interface_contract() -> None:
+    metadata = (
+        ROOT / "skills" / "agy-supervisor" / "agents" / "openai.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert re.search(r"(?m)^interface:\s*$", metadata)
+    assert re.search(r"(?m)^\s+display_name:\s+AGY Supervisor\s*$", metadata)
+    assert re.search(
+        r"(?m)^\s+short_description:\s+Let Codex supervise bounded Antigravity coding tasks\.\s*$",
+        metadata,
+    )
+    assert re.search(
+        r"(?m)^\s+default_prompt:\s+Use AGY Supervisor mode for this explicitly delegated coding task\.\s*$",
+        metadata,
+    )
 
 
 def test_validator_passes() -> None:

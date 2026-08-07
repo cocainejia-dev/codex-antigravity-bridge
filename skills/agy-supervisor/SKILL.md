@@ -7,84 +7,73 @@ description: Use when the user explicitly asks Codex to involve Antigravity, agy
 
 ## Normal mode
 
-Do not call `agy_ask` during ordinary development. Use delegation only when the user explicitly asks for Antigravity involvement or explicitly opts into Supervisor mode.
+Do not call `agy_ask`, `agy_ask_json`, or `agy_start` during ordinary
+development. Use delegation only when the user explicitly asks for Antigravity
+involvement or explicitly opts into Supervisor mode.
 
 ## Supervisor mode
 
 Use this sequence:
 
-1. Inspect the repository and the requested scope.
-2. Define the workdir and file ownership before delegating.
-3. Call `agy_ask` with a scoped prompt.
-4. Inspect the diff, status, and tests after the call.
-5. Send at most two corrective calls after the initial call.
-6. Accept the result or stop with a blocker.
+1. Inspect the repository and requested scope.
+2. Define the workdir, risk class, authorization, and exclusive file ownership.
+3. Build the required delegation prompt and choose the permission mode.
+4. Call `agy_ask`, `agy_ask_json`, or `agy_start`.
+5. Inspect status, diff, worktree boundaries, output, and tests.
+6. Accept only a verified success; otherwise make at most two evidence-based
+   corrective calls, then stop with the exact blocker.
 
-Require every `agy_ask` prompt to include task scope, forbidden files, acceptance criteria, and verification commands.
+Every delegation prompt must include task scope, owned files, forbidden files,
+acceptance criteria, verification commands, permission mode, authorization, and
+the requested report fields. The copyable template, risk matrix, result state
+machine, lifecycle checklist, correction protocol, and pressure cases are in
+[`references/agy-supervisor-protocol.md`](references/agy-supervisor-protocol.md).
+Parallel worktree plans live under `docs/agy-plans/` and start with
+`Status: READY_FOR_AGY`; inspect `git worktree list` before and after delegation.
+
+### Tool and output rules
+
+- Apply the same scope and permission contract to `agy_ask`, `agy_ask_json`, and
+  `agy_start`; `agy_ask_json` additionally requires parseable JSON matching the
+  requested output schema.
+- `dangerously_skip_permissions=false` is the default. Enable it only after
+  explicit authorization for the exact trusted worktree and task.
+- `agy_status` may report `queued`, `running`, `completed`, `failed`, or
+  `unknown`. An `unknown` job is not a success: preserve the worktree, inspect
+  it manually, and do not restart blindly.
+- A result is `succeeded` only with usable output, acceptable exit status, no
+  permission/authentication error, and passing acceptance criteria.
+- There are three total AGY calls per delegated task: one initial call and at
+  most two corrective calls. Never issue a fourth call or widen ownership.
+
+### Hard boundaries
+
+Do not delegate unresolved shared state, routing, authentication, database,
+production, secrets, irreversible operations, concurrent writes in one
+worktree, or unknown workdirs. Destructive and production work is blocked by
+default; production operations remain forbidden even with full access.
 
 ## Authorization checkpoint
 
-Ask the user whether to enable AGY collaboration when the task is substantial,
-has at least two independently implementable pages or modules, or would benefit
-from a second implementation track, but the user has not explicitly requested
-Antigravity. Ask at most once for the task. Do not ask for trivial fixes,
-read-only analysis, or tasks involving secrets, production operations, or
-irreversible actions.
+Ask once whether to enable AGY collaboration when the task is substantial,
+needs at least two independently implementable pages/modules, or benefits from
+a second implementation track and the user has not already opted in. Do not
+ask for trivial fixes, read-only analysis, secrets, production operations, or
+irreversible actions. If the user declines, continue in Normal mode.
 
-If the user declines, continue in Normal mode. If the user agrees, create the
-plan before starting AGY.
+## Parallel worktree gate
 
-## Parallel worktree mode
+Use parallel mode only when shared contracts are known, file boundaries are
+exclusive, and Codex and AGY can work in different worktrees. Create and commit
+the plan under `docs/agy-plans/`, create the AGY branch/worktree, start with
+`agy_start`, poll with `agy_status`, and merge only after the post-delegation
+audit and acceptance criteria pass. Use `agy_ask` only as a synchronous fallback
+when asynchronous tools are unavailable.
 
-Use this mode when Codex and AGY should develop the same project at the same
-time. Never let them write to the same worktree or the same file.
+Stop when acceptance criteria and tests pass, there is no meaningful progress,
+scope changes, a permission/authentication blocker appears, a timeout occurs,
+or a user decision is required.
 
-1. Create `docs/agy-plans/YYYY-MM-DD-<slug>.md` from the bundled plan template.
-2. Fill in the goal, Codex-owned files, AGY-owned files, worktree path,
-   forbidden files, acceptance criteria, test commands, permission setting,
-   and stop conditions. Set `Status: READY_FOR_AGY`.
-3. Commit the plan on the current branch so the AGY worktree can read it.
-4. Create an isolated worktree and branch:
-
-   ```text
-   git worktree add .worktrees/agy/<slug> -b codex/agy-<slug> HEAD
-   ```
-
-5. Start AGY asynchronously with `agy_start`, passing the AGY worktree as
-   `workdir` and instructing it to read the plan and modify only its owned
-   files. Poll the returned job id with `agy_status` while Codex continues in
-   its own worktree.
-6. When AGY finishes, inspect its worktree diff and tests. Merge its branch
-   only after the plan's acceptance criteria pass and no forbidden files were
-   changed.
-
-Use `agy_ask` instead of `agy_start` only when asynchronous tools are
-unavailable; that is a synchronous fallback and does not provide simultaneous
-development.
-
-The handoff prompt must be concise and point to the committed plan:
-
-```text
-Read <absolute path to docs/agy-plans/...md>. Implement only the AGY-owned tasks
-in that plan from the assigned worktree. Do not edit the plan, Codex-owned files,
-or forbidden files. Run the listed verification commands and report changed
-files, tests, and blockers.
-```
-
-Parallel delegation requires at least two independently implementable pages or
-modules, known shared contracts, exclusive file boundaries, and a clean
-worktree relationship. Do not parallelize unresolved shared state, routing,
-authentication, database changes, or shared infrastructure.
-
-Do not delegate work with unresolved shared state, routing changes, authentication changes, database changes, production operations, secrets, irreversible actions, concurrent writes in one worktree, or unknown workdirs.
-
-Set `dangerously_skip_permissions=false` by default. Enable it only when the user gives explicit authorization for a trusted task.
-
-Stop when acceptance criteria pass, tests pass, there is no meaningful progress, the work is out of scope, an authentication or permission blocker appears, a timeout occurs, or a user decision is required.
-
-Never store OAuth tokens or private machine configuration.
-
-Limit each delegated task to three total AGY calls: one initial call and at
-most two corrective calls. For parallel mode, treat each worktree task as one
-delegated task and stop polling when the plan is complete, a blocker occurs,
-or the worker changes scope.
+Never store OAuth tokens or private machine configuration. See the reference
+protocol before every delegated implementation and the plan template before
+parallel worktree collaboration.

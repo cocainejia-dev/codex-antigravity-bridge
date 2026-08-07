@@ -17,6 +17,10 @@ def main() -> int:
         raise SystemExit(f"missing skill metadata: {METADATA}")
 
     skill = SKILL.read_text(encoding="utf-8")
+    package_docs = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in SKILL.parent.rglob("*.md")
+    )
     metadata = METADATA.read_text(encoding="utf-8")
     required = (
         "name: agy-supervisor",
@@ -37,10 +41,14 @@ def main() -> int:
 
     if not skill.startswith("---\n") or "\n---\n" not in skill[4:]:
         raise SystemExit("skill frontmatter is missing or malformed")
-    missing = [value for value in required if value not in skill]
+    missing = [value for value in required if value not in f"{skill}\n{package_docs}"]
     if missing:
         raise SystemExit(f"skill is missing required content: {', '.join(missing)}")
-    present_forbidden = [value for value in forbidden if value in skill or value in metadata]
+    present_forbidden = [
+        value
+        for value in forbidden
+        if value in package_docs or value in metadata
+    ]
     if present_forbidden:
         raise SystemExit(f"skill contains forbidden credential or placeholder text: {', '.join(present_forbidden)}")
 
