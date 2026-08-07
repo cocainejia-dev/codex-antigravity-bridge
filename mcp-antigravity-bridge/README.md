@@ -25,6 +25,8 @@
   <a href="../docs/README.en.md">Docs index</a>
 </p>
 
+<p><a href="../README.md">中文项目首页</a> · <a href="../README.en.md">English project overview</a></p>
+
 </div>
 
 > [!IMPORTANT]
@@ -89,6 +91,8 @@ Watch live agy output         -> collaboration + display_mode="terminal"
 ```
 
 The bridge exposes six local MCP tools. Synchronous tools run a bounded `agy -p` call and return cleaned output. Asynchronous tools start explicit jobs in a caller-provided workdir so Codex can continue working. The optional collaboration MVP creates isolated Git worktrees for a declared task list; Codex still reviews and merges the branches.
+
+All public task tools reject a non-positive or non-finite `timeout` before starting a process or job. The default is `300.0` seconds for ordinary tools and `900.0` seconds for `agy_collab_start`.
 
 ## ✨ Why This Bridge
 
@@ -280,7 +284,7 @@ available through `agy_collab_status`.
 | --- | --- | --- |
 | `prompt` | required | Task instruction sent to Antigravity |
 | `workdir` | `""` | Working directory; empty means inherited directory |
-| `timeout` | `300.0` | Hard wall-clock limit in seconds |
+| `timeout` | `300.0` | Positive hard wall-clock limit in seconds |
 | `dangerously_skip_permissions` | `false` | Adds the bypass flag when explicitly enabled |
 
 Safe read-only example:
@@ -413,16 +417,19 @@ mcp-antigravity-bridge/
 ├── src/codex_agy_bridge/
 │   ├── agy_runner.py    # CLI discovery, subprocess, PTY fallback, output cleanup
 │   ├── agy_jobs.py      # asynchronous job registry
+│   ├── agy_collaboration.py # collaboration contracts and Git worktrees
 │   ├── server.py        # FastMCP tool registration
 │   └── __main__.py      # python -m codex_agy_bridge entry point
 ├── tests/
 │   ├── test_smoke.py
 │   ├── test_mcp_stdio.py
-│   └── test_async_jobs.py
+│   ├── test_async_jobs.py
+│   └── test_collaboration.py
 ├── examples/
 │   └── codex-config.toml
 ├── pyproject.toml
-└── README.md
+├── README.md
+└── README.en.md
 ```
 
 ## 🔗 References

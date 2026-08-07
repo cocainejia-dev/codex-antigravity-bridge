@@ -6,7 +6,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/runtime-ready-16a34a?style=for-the-badge" alt="Runtime ready">
-  <img src="https://img.shields.io/badge/tests-46%20passed-2563EB?style=for-the-badge" alt="46 tests passed">
+  <img src="https://img.shields.io/badge/tests-57%20passed-2563EB?style=for-the-badge" alt="57 tests passed">
   <img src="https://img.shields.io/badge/CI-GitHub%20Actions-0ea5e9?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-111827?style=for-the-badge" alt="Apache 2.0 license">
 </p>
@@ -106,6 +106,7 @@ Codex 在自己的工作区继续开发，轮询协同状态
 - 新增协同开发 MVP：校验共享契约与互斥文件边界，创建临时分支和 worktree，并并行启动多个 agy 任务。
 - 新增可选实时终端模式：用户确认后按任务打开可见 Windows 终端，默认不弹窗。
 - 协同启动前询问显示方式和任务数量，默认 1 个任务，硬上限 4 个。
+- 同步和异步公开工具会在启动进程或 job 前拒绝非正数或非有限 `timeout`。
 
 ## ✅ 已完成 · Completed
 
@@ -202,12 +203,12 @@ python scripts/validate_skill.py
 git diff --check
 ```
 
-Latest verification: repository tests 46 passed in total; root tests 19 passed; bridge tests 27 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
+Latest verification: repository tests 57 passed in total; root tests 20 passed; bridge tests 37 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
 
 当前结果：
 
-- 仓库总测试：46 passed；根测试：19 passed。
-- bridge 测试：27 passed，包含真实 MCP stdio 工具清单测试。
+- 仓库总测试：57 passed；根测试：20 passed。
+- bridge 测试：37 passed，包含真实 MCP stdio 工具清单测试。
 - skill validator：skill validation passed。
 - README Markdown 代码围栏：已检查为真实反引号，围栏成对闭合。
 - CI 配置：已覆盖 Windows 与 Ubuntu、多版本 Python、根测试和 bridge 测试。

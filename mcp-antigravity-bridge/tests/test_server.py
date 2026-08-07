@@ -73,3 +73,17 @@ def test_agy_ask_json_returns_parseable_json(monkeypatch):
 def test_agy_start_requires_explicit_workdir():
     with pytest.raises(ValueError, match="workdir"):
         server.agy_start("Implement the task")
+
+
+def test_public_tools_reject_nonpositive_timeouts(tmp_path):
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_ask("Say hi", timeout=0)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_ask_json("Return JSON", timeout=-1)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_start("Implement the task", workdir=str(tmp_path), timeout=0)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_ask("Say hi", timeout=float("nan"))

@@ -6,7 +6,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/runtime-ready-16a34a?style=for-the-badge" alt="Runtime ready">
-  <img src="https://img.shields.io/badge/tests-46%20passed-2563EB?style=for-the-badge" alt="46 tests passed">
+  <img src="https://img.shields.io/badge/tests-57%20passed-2563EB?style=for-the-badge" alt="57 tests passed">
   <img src="https://img.shields.io/badge/CI-GitHub%20Actions-0ea5e9?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-111827?style=for-the-badge" alt="Apache 2.0 license">
 </p>
@@ -100,6 +100,7 @@ the acceptance criteria passed.
 - Collaboration sessions enforce a maximum of four tasks.
 - Terminal mode is opt-in and Windows-only; headless mode remains the default.
 - The Codex skill asks for display preference and task count before collaboration.
+- Public synchronous and async tools reject non-positive or non-finite timeouts before starting work.
 
 ## Verification Evidence
 
@@ -113,9 +114,9 @@ git diff --check
 
 Latest verification:
 
-- Repository tests: 46 passed in total.
-- Root tests: 19 passed.
-- Bridge tests: 27 passed, including the real MCP stdio tool-list smoke test.
+- Repository tests: 57 passed in total.
+- Root tests: 20 passed.
+- Bridge tests: 37 passed, including the real MCP stdio tool-list smoke test.
 - Skill validation passed.
 - Compileall passed.
 - README, progress, and documentation-index links are covered by tests.

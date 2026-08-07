@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,18 @@ def _require_success(result: AgyResult) -> AgyResult:
     return result
 
 
+def _validate_timeout(timeout: float) -> float:
+    """Reject invalid MCP timeouts before starting a subprocess or job."""
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a positive finite number")
+    return float(timeout)
+
+
 @mcp.tool()
 def agy_ask(
     prompt: str,
@@ -53,7 +66,7 @@ def agy_ask(
     result = run_agy(
         prompt,
         workdir=workdir or None,
-        timeout=timeout,
+        timeout=_validate_timeout(timeout),
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
     return _require_success(result).text
@@ -73,7 +86,7 @@ def agy_ask_json(
     result = run_agy(
         prompt,
         workdir=workdir or None,
-        timeout=timeout,
+        timeout=_validate_timeout(timeout),
         output_format="json",
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
@@ -109,7 +122,7 @@ def agy_start(
     return agy_jobs.start(
         prompt,
         workdir=workdir or None,
-        timeout=timeout,
+        timeout=_validate_timeout(timeout),
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
 
@@ -117,8 +130,6 @@ def agy_start(
 @mcp.tool()
 def agy_status(job_id: str) -> str:
     """Return JSON status for an asynchronous agy task."""
-    import json
-
     return json.dumps(agy_jobs.status(job_id), ensure_ascii=False)
 
 

@@ -24,6 +24,8 @@ so that user guidance is not mixed with implementation records.
 package. It stays beside `pyproject.toml`, `src/`, and `tests/` so package
 developers can find installation and runtime details in one place. It is not the
 project landing page; start with the root `README.md` or `README.en.md` instead.
+The package manual is maintained in English; the root project overviews and
+progress records are available in both Chinese and English.
 
 ### Design and execution history
 
@@ -45,4 +47,5 @@ users.
 - `PROGRESS.md`: Chinese project progress.
 - `PROGRESS.en.md`: English project progress.
 - `mcp-antigravity-bridge/README.md`: package-level runtime technical manual.
+- `mcp-antigravity-bridge/examples/codex-config.toml`: manual MCP configuration example.
 - `docs/`: documentation indexes, design history, and long-lived reference material.

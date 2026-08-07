@@ -11,6 +11,7 @@
 | 中文项目进度 | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | 安装、代理、MCP 工具和排错 | [运行时技术手册](../mcp-antigravity-bridge/README.md) |
+| Runtime manual in English | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
 | AGY 协同规则和安全边界 | [agy-supervisor 技能](../skills/agy-supervisor/SKILL.md) |
 | 研究资料 | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
@@ -21,6 +22,7 @@
 `mcp-antigravity-bridge/README.md` 是 Python MCP 包的技术手册，和
 `pyproject.toml`、`src/`、`tests/` 放在同一目录，方便安装包的开发者直接查看。
 它不是项目首页；项目首页统一从根目录的 `README.md` 和 `README.en.md` 开始。
+运行时手册目前以英文维护，根目录提供完整的中英文项目入口和双语进度记录。
 
 ### 设计与执行记录
 
@@ -41,4 +43,5 @@
 - `PROGRESS.md`：中文项目进度。
 - `PROGRESS.en.md`：英文项目进度。
 - `mcp-antigravity-bridge/README.md`：包级运行时技术手册。
+- `mcp-antigravity-bridge/examples/codex-config.toml`：手动 MCP 配置示例。
 - `docs/`：文档索引、设计历史和长期参考资料。

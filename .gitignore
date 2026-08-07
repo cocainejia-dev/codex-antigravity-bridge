@@ -10,3 +10,4 @@ build/
 .env
 node_modules/
 .worktrees/
+.codegraph/

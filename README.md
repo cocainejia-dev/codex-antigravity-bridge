@@ -19,7 +19,8 @@
   <a href="#tools">工具</a> ·
   <a href="#supervisor-mode">监督模式</a> ·
   <a href="README.en.md">英文项目首页</a> ·
-  <a href="docs/README.md">文档索引</a>
+  <a href="docs/README.md">文档索引</a> ·
+  <a href="mcp-antigravity-bridge/README.md">运行时技术手册</a>
 </p>
 
 </div>
@@ -234,7 +235,7 @@ agy_collab_start(
 | --- | --- | --- |
 | `prompt` | 必填 | 交给 Antigravity 的任务说明 |
 | `workdir` | `""` | 空字符串表示继承当前目录 |
-| `timeout` | `300.0` | 硬超时时间，单位为秒 |
+| `timeout` | `300.0` | 硬超时时间，单位为秒，必须为正的有限数 |
 | `dangerously_skip_permissions` | `false` | 仅在明确授权的可信任务中启用 |
 
 <a id="supervisor-mode"></a>
