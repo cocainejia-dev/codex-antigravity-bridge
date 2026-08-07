@@ -2,22 +2,34 @@
 
 # codex-agy-bridge
 
-An MCP server that lets Codex call Google's Antigravity `agy` CLI headlessly.
+### A local MCP bridge between Codex and Google's headless Antigravity CLI
 
 <p>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-local%20stdio-111827?style=flat-square" alt="Local MCP stdio"></a>
-  <a href="https://github.com/google-antigravity/antigravity-cli"><img src="https://img.shields.io/badge/Antigravity-agy%20CLI-4285F4?style=flat-square&logo=google&logoColor=white" alt="Antigravity agy CLI"></a>
-  <a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-16a34a?style=flat-square" alt="Apache 2.0 license"></a>
+  <a href="https://github.com/crazyzhang277/codex-antigravity-bridge"><img src="https://img.shields.io/badge/status-active-16a34a?style=for-the-badge" alt="Active"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-local%20stdio-111827?style=for-the-badge" alt="MCP local stdio"></a>
+  <a href="https://github.com/google-antigravity/antigravity-cli"><img src="https://img.shields.io/badge/Antigravity-agy%20CLI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Antigravity agy CLI"></a>
 </p>
 
-🇨🇳 [简体中文项目首页](../README.md)
+<p><strong>Scope clearly · Delegate safely · Review the diff</strong></p>
+
+<p>
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#tool-api">Tool API</a> ·
+  <a href="#parallel-worktree-workflow">Worktrees</a> ·
+  <a href="../README.md">中文项目首页</a>
+</p>
 
 </div>
 
-## Overview
+> [!IMPORTANT]
+> **CLI-only.** This project invokes Antigravity's headless `agy` CLI. It does not launch, embed, or control the Antigravity desktop GUI.
 
-`codex-agy-bridge` exposes four local MCP tools for bounded Antigravity CLI work. Synchronous tools run `agy -p` and return cleaned output. Asynchronous tools start a job in a separate Git worktree so Codex can keep working while the task runs.
+## At A Glance
+
+| Codex | Bridge | Antigravity |
+| :---: | :---: | :---: |
+| Plan · Split · Review | MCP · permissions · worktrees | Implement · Test · Report |
 
 ```mermaid
 flowchart LR
@@ -26,22 +38,26 @@ flowchart LR
     A --> G[Antigravity agent]
 ```
 
-The supported integration is CLI-only. This project does **not** launch, embed, or control the Antigravity desktop GUI.
+The bridge exposes four local MCP tools. Synchronous tools run a bounded `agy -p` call and return cleaned output. Asynchronous tools start explicit jobs in separate Git worktrees so Codex can continue working.
 
-### Design goals
+## Why This Bridge
 
-- **Native integration:** use the bridge from Codex Desktop or Codex CLI through MCP.
-- **CLI-first:** reuse `agy`'s own login, workspace, and permission flow.
-- **Windows-aware:** support non-ASCII workdirs and retry through ConPTY when direct output is empty.
-- **Small surface:** local stdio transport, four tools, no web server, database, or SDK runtime.
+<table>
+<tr>
+<td width="25%"><strong>Native MCP</strong><br><sub>Use it from Codex Desktop or Codex CLI without a separate web service.</sub></td>
+<td width="25%"><strong>CLI-first</strong><br><sub>Reuse `agy` login, workspace, and permission behavior.</sub></td>
+<td width="25%"><strong>Windows-aware</strong><br><sub>Handle non-ASCII workdirs and retry empty output through ConPTY.</sub></td>
+<td width="25%"><strong>Small surface</strong><br><sub>Local stdio, four tools, no database or SDK runtime.</sub></td>
+</tr>
+</table>
 
 ## Quick Start
 
-### Prerequisites
+### 01 · Prerequisites
 
 - Python 3.10 or newer.
-- Antigravity CLI installed and available as `agy`.
-- An interactive `agy` login completed before the first headless call.
+- Antigravity CLI installed as `agy`.
+- One completed interactive `agy` login.
 - Codex Desktop or Codex CLI with MCP support.
 
 On Windows PowerShell:
@@ -52,9 +68,9 @@ agy --version
 agy
 ```
 
-On macOS or Linux, follow the [Antigravity CLI documentation](https://antigravity.google/docs/cli/overview) and run `agy` once to complete login.
+On macOS or Linux, follow the [Antigravity CLI documentation](https://antigravity.google/docs/cli/overview), then run `agy` once to complete login.
 
-### Install the bridge
+### 02 · Install the bridge
 
 From this directory:
 
@@ -70,7 +86,7 @@ python -m pip install -e ".[dev]"
 
 The `dev` extra installs pytest. The `winpty` extra enables the Windows ConPTY fallback. The package does not install or manage Antigravity OAuth credentials.
 
-### Register with Codex
+### 03 · Register with Codex
 
 ```powershell
 codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
@@ -79,7 +95,8 @@ codex mcp list
 
 The bridge starts automatically over local MCP stdio. No separate HTTP server is required.
 
-For a checked-in or machine-specific configuration:
+<details>
+<summary>Manual MCP configuration</summary>
 
 ```toml
 [mcp_servers.codex-agy-bridge]
@@ -88,7 +105,16 @@ args = ["-m", "codex_agy_bridge"]
 startup_timeout_sec = 120
 ```
 
+</details>
+
 ## Tool API
+
+| Tool | Best for | Result |
+| --- | --- | --- |
+| `agy_ask` | A bounded synchronous task | Cleaned text |
+| `agy_ask_json` | Structured CLI output | JSON text |
+| `agy_start` | Explicit parallel worktree work | `job_id` |
+| `agy_status` | Polling an async job | Status and result JSON |
 
 ### `agy_ask`
 
@@ -101,7 +127,7 @@ agy_ask(
 ) -> str
 ```
 
-Use it for a normal, bounded task such as inspecting files, explaining code, or proposing documentation changes.
+Use it for bounded tasks such as inspecting files, explaining code, or proposing documentation changes.
 
 ### `agy_ask_json`
 
@@ -114,32 +140,30 @@ agy_ask_json(
 ) -> str
 ```
 
-Use it when the prompt requires structured output. Internally, the bridge adds `--output-format json`; the public tool still returns the result as text.
+Use it when the prompt requires structured output. The bridge adds `--output-format json` internally and returns the result as text.
 
 ### `agy_start` and `agy_status`
 
-Use `agy_start` only for explicit parallel worktree collaboration. It returns a job id immediately. Poll that id with `agy_status` while Codex works in another worktree.
-
-Async status is JSON text with one of these states:
+Use `agy_start` only for explicit parallel worktree collaboration. Poll the returned job id with `agy_status`.
 
 | State | Meaning |
 | --- | --- |
-| `queued` | Job accepted and waiting to run |
+| `queued` | Accepted and waiting to run |
 | `running` | Antigravity process is active |
 | `completed` | Process finished successfully |
 | `failed` | Process finished with an error |
-| `unknown` | Job is not available in the current bridge process |
+| `unknown` | Job is unavailable in this bridge process |
 
 ### Shared parameters
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `prompt` | required | Task instruction sent to Antigravity |
-| `workdir` | `""` | Working directory; empty means the inherited directory |
+| `workdir` | `""` | Working directory; empty means inherited directory |
 | `timeout` | `300.0` | Hard wall-clock limit in seconds |
-| `dangerously_skip_permissions` | `false` | Adds the permission bypass flag when explicitly enabled |
+| `dangerously_skip_permissions` | `false` | Adds the bypass flag when explicitly enabled |
 
-Example of a safe read-only request:
+Safe read-only example:
 
 ```text
 Use agy_ask once. Inspect README.md and return three concrete improvements.
@@ -148,18 +172,19 @@ Keep the task read-only, use the repository root as workdir, and do not modify f
 
 ## Parallel Worktree Workflow
 
-The asynchronous tools are intended for independent, well-bounded work. Before calling `agy_start`, Codex should establish shared contracts, write a plan under `docs/agy-plans/`, assign exclusive file boundaries, and create the AGY worktree.
+Use asynchronous work only for independent, well-bounded tasks.
 
-Use this pattern only when:
+Before calling `agy_start`, Codex should:
 
-- at least two areas can be implemented independently;
-- shared routes, components, state, and data contracts are explicit;
-- each task has an exclusive file boundary and acceptance checks;
-- no other process is editing the same files.
+1. Define shared routes, components, state, and data contracts.
+2. Write a plan under `docs/agy-plans/`.
+3. Assign exclusive file boundaries and acceptance checks.
+4. Create the AGY worktree.
+5. Keep other processes away from the same files.
 
-Each delegated task has at most three AGY calls: one initial implementation and at most two corrections. Stop immediately when tests pass, the task exceeds its boundary, progress stops, the process times out, or a user decision is required.
+Each delegated task has at most three AGY calls: one initial implementation and at most two corrections. Stop when tests pass, the task exceeds its boundary, progress stops, the process times out, or a user decision is required.
 
-Codex remains responsible for reviewing the diff, running tests, checking worktree state, and deciding whether to merge the result.
+Codex remains responsible for reviewing the diff, checking worktree state, running tests, and deciding whether to merge.
 
 ## Runtime Behavior
 
@@ -168,41 +193,41 @@ The runtime lives in `src/codex_agy_bridge/`:
 1. `server.py` registers the four MCP tools with FastMCP.
 2. `agy_runner.py` discovers the CLI through `AGY_PATH`, `PATH`, and platform defaults.
 3. The runner builds `agy -p <prompt>` and optionally adds JSON output or the permission bypass.
-4. On Windows, non-ASCII workdirs are converted to an ASCII short path when available.
-5. Direct subprocess execution is attempted first. Empty stdout triggers a Windows ConPTY or POSIX `pty` retry.
-6. ANSI escapes, carriage-return repainting, and TUI decoration are removed before returning text.
+4. Windows non-ASCII workdirs are converted to an ASCII short path when available.
+5. Direct subprocess execution is attempted first; empty stdout triggers a ConPTY or POSIX `pty` retry.
+6. ANSI escapes, carriage-return repainting, and TUI decoration are removed.
 7. `agy_jobs.py` manages explicit asynchronous jobs in a bounded thread pool.
-
-The public tools return cleaned text. The internal runner also tracks the exit code and whether a PTY was used.
 
 ## Configuration
 
-If `agy` is not on `PATH`, set `AGY_PATH` to the full executable path:
+If `agy` is not on `PATH`, set `AGY_PATH`:
 
 ```powershell
 $env:AGY_PATH = "C:\path\to\agy.exe"
 ```
 
-If Codex Desktop cannot find Python, replace `command` in the MCP configuration with Python's absolute path. Keep the MCP launch command on an ASCII path when possible, but pass the actual project directory through `workdir`.
+If Codex Desktop cannot find Python, use Python's absolute path in the MCP configuration. Keep the launch command on an ASCII path when possible, but pass the actual project directory through `workdir`.
 
 ## Security Boundary
 
-- The bridge communicates with its MCP client over local stdio.
+- Communication stays on local MCP stdio.
 - `dangerously_skip_permissions` defaults to `false`.
-- Enabling the bypass removes interactive permission prompts. Use it only for trusted prompts, trusted workdirs, and reversible actions.
-- Never commit Antigravity OAuth material, proxy credentials, or private Codex configuration.
-- Do not delegate production operations, irreversible actions, cross-project writes, or tasks with unclear boundaries.
+- Use the bypass only for trusted prompts, trusted workdirs, and reversible actions.
+- Never commit OAuth material, proxy credentials, or private Codex configuration.
+- Do not delegate production operations, irreversible actions, cross-project writes, or unclear tasks.
 
 ## Verification
 
-Run the local checks from this directory:
+Run from this directory:
 
 ```powershell
 python -m pytest -q
 python -m compileall -q src
 ```
 
-The unit tests mock the process boundary and do not require a live Antigravity login. For a layered real-machine check:
+The unit tests mock the process boundary and do not require a live Antigravity login.
+
+For a layered real-machine check:
 
 ```powershell
 agy -p "Reply exactly DIRECT_AGY_OK" --dangerously-skip-permissions
@@ -213,25 +238,33 @@ Then call `agy_ask` from Codex with a small, reversible task.
 
 ## Troubleshooting
 
-### `agy binary not found`
+<details>
+<summary><code>agy</code> binary not found</summary>
 
 Run `agy --version`. Install the CLI or set `AGY_PATH` to the full executable path.
 
-### `Authentication required`
+</details>
 
-Run `agy` interactively once and complete the CLI login. The bridge does not store or manage OAuth credentials.
+<details>
+<summary>Authentication required</summary>
 
-### Empty output from a headless call
+Run `agy` interactively once and complete CLI login. The bridge does not store or manage OAuth credentials.
 
-Install the `winpty` extra on Windows. The runner automatically retries through ConPTY on Windows or `pty` on POSIX when direct stdout is empty.
+</details>
 
-### `agy timed out after ...s`
+<details>
+<summary>Empty output from a headless call</summary>
 
-Increase `timeout` for a genuinely long task, or reduce the prompt's scope. The timeout is a hard wall-clock limit for the child process.
+Install the `winpty` extra on Windows. The runner retries through ConPTY on Windows or `pty` on POSIX when direct stdout is empty.
 
-### Async job is `unknown`
+</details>
 
-Job state is kept in memory by one bridge process. If the MCP process restarted, the old job id is no longer available. Start the task again only after Codex has reviewed the existing worktree.
+<details>
+<summary>Async job is <code>unknown</code></summary>
+
+Job state is kept in memory by one bridge process. If the MCP process restarted, the old job id is unavailable. Start again only after Codex has reviewed the existing worktree.
+
+</details>
 
 ## Project Structure
 
