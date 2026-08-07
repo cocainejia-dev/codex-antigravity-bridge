@@ -44,6 +44,14 @@ Antigravity agent
 | README 文档 | 已完成 | 中文项目首页、英文技术手册、中文进度页 |
 | CI | 未完成 | 当前依赖本地验证命令 |
 
+### 最近审计修复
+
+- 异步任务现在会把非零 `agy` 退出码报告为 `failed`，不再误报 `completed`。
+- runner 现在基于清洗后的输出判断 PTY fallback，能处理“只有 ANSI/TUI 装饰”的空结果。
+- `agy_ask_json` 现在拒绝不可解析的 JSON；请求 schema 仍由 supervisor 根据 Prompt 契约验收。
+- `agy_start` 现在要求调用方传入已存在的独立 worktree 目录，bridge 不会误用当前目录或自动创建 worktree。
+- MCP 权限提示已明确要求用户对 exact worktree/task 进行授权后才能启用权限绕过。
+
 ## 已完成
 
 ### 研究与决策

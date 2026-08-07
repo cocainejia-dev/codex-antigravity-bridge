@@ -52,3 +52,26 @@ def test_status_reports_unknown_job():
         "state": "unknown",
         "error": "job not found",
     }
+
+
+def test_status_reports_nonzero_exit_as_failed(monkeypatch):
+    def failed_run_agy(*args, **kwargs):
+        return AgyResult(text="agy failed", exit_code=1, used_pty=False)
+
+    monkeypatch.setattr("codex_agy_bridge.agy_jobs.run_agy", failed_run_agy)
+    registry = AgyJobRegistry()
+
+    job_id = registry.start("Fail this task")
+    for _ in range(20):
+        status = registry.status(job_id)
+        if status["state"] == "failed":
+            break
+        time.sleep(0.01)
+
+    assert status == {
+        "job_id": job_id,
+        "state": "failed",
+        "text": "agy failed",
+        "exit_code": 1,
+        "used_pty": False,
+    }

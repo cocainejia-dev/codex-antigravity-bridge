@@ -55,9 +55,10 @@ class AgyJobRegistry:
         except Exception as exc:  # noqa: BLE001 - report worker failures to MCP.
             return {"job_id": job_id, "state": "failed", "error": str(exc)}
 
+        state = "completed" if result.exit_code == 0 else "failed"
         return {
             "job_id": job_id,
-            "state": "completed",
+            "state": state,
             "text": result.text,
             "exit_code": result.exit_code,
             "used_pty": result.used_pty,

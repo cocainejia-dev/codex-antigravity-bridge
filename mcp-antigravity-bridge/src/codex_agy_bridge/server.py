@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
 
 from .agy_jobs import agy_jobs
@@ -13,8 +16,10 @@ mcp = FastMCP(
         "Bridge from Codex to the Google Antigravity agent. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
-        "use agy_start and agy_status for explicit asynchronous worktree collaboration. "
-        "For trusted autonomous work, pass dangerously_skip_permissions=true."
+        "use agy_start and agy_status for explicit asynchronous worktree collaboration "
+        "with a caller-created isolated workdir. "
+        "Only pass dangerously_skip_permissions=true after the user explicitly "
+        "authorizes that exact trusted worktree and task."
     ),
 )
 
@@ -61,6 +66,12 @@ def agy_ask_json(
         output_format="json",
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
+    if result.exit_code != 0:
+        raise RuntimeError(f"agy exited with code {result.exit_code}: {result.text}")
+    try:
+        json.loads(result.text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("agy_ask_json did not return valid JSON") from exc
     return result.text
 
 
@@ -73,9 +84,18 @@ def agy_start(
 ) -> str:
     """Start an asynchronous agy task and return its job id.
 
-    Use this for explicit parallel worktree collaboration. Poll the returned
-    id with ``agy_status`` while Codex continues work in another worktree.
+    Use this for explicit parallel worktree collaboration. The caller must
+    provide an existing isolated worktree as workdir; the bridge does not
+    create one. Poll the returned id with ``agy_status`` while Codex continues
+    work elsewhere.
     """
+    if not workdir.strip():
+        raise ValueError(
+            "agy_start requires an explicit workdir for a caller-created isolated worktree"
+        )
+    if not Path(workdir).expanduser().is_dir():
+        raise ValueError(f"agy_start workdir is not an existing directory: {workdir}")
+
     return agy_jobs.start(
         prompt,
         workdir=workdir or None,

@@ -99,8 +99,8 @@ codex mcp list
 | 工具 | 作用 | 返回 |
 | --- | --- | --- |
 | `agy_ask` | 同步执行一次受控 CLI 任务 | 清理后的文本 |
-| `agy_ask_json` | 请求结构化 CLI 输出 | JSON 输出文本 |
-| `agy_start` | 在独立 worktree 中异步启动任务 | `job_id` |
+| `agy_ask_json` | 请求结构化 CLI 输出，并拒绝非法 JSON | JSON 输出文本 |
+| `agy_start` | 在调用方提供的独立 worktree 中异步启动任务 | `job_id` |
 | `agy_status` | 查询异步任务 | 状态与结果 JSON |
 
 常用的只读请求：
@@ -157,7 +157,7 @@ stateDiagram-v2
 页面 3：reports/，只允许修改 reports 页面和专属组件
 ```
 
-Codex 会先把计划写入 `docs/agy-plans/`，再创建独立 AGY worktree。任务结束后检查 `agy_status`、diff 和测试结果，再决定是否合并。
+Codex 会先把计划写入 `docs/agy-plans/`，创建并验证独立 AGY worktree，再把该目录作为 `workdir` 传给 `agy_start`。bridge 不会自动创建 Git worktree，也不会替代 supervisor 做边界审计。任务结束后检查 `agy_status`、diff 和测试结果，再决定是否合并。
 
 ## 配置与 Windows 支持
 

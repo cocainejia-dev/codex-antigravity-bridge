@@ -38,7 +38,7 @@ flowchart LR
     A --> G[Antigravity agent]
 ```
 
-The bridge exposes four local MCP tools. Synchronous tools run a bounded `agy -p` call and return cleaned output. Asynchronous tools start explicit jobs in separate Git worktrees so Codex can continue working.
+The bridge exposes four local MCP tools. Synchronous tools run a bounded `agy -p` call and return cleaned output. Asynchronous tools start explicit jobs in a caller-provided workdir so Codex can continue working; the caller is responsible for creating and validating an isolated Git worktree.
 
 ## Why This Bridge
 
@@ -113,7 +113,7 @@ startup_timeout_sec = 120
 | --- | --- | --- |
 | `agy_ask` | A bounded synchronous task | Cleaned text |
 | `agy_ask_json` | Structured CLI output | JSON text |
-| `agy_start` | Explicit parallel worktree work | `job_id` |
+| `agy_start` | Explicit work in a caller-created worktree | `job_id` |
 | `agy_status` | Polling an async job | Status and result JSON |
 
 ### `agy_ask`
@@ -140,11 +140,11 @@ agy_ask_json(
 ) -> str
 ```
 
-Use it when the prompt requires structured output. The bridge adds `--output-format json` internally and returns the result as text.
+Use it when the prompt requires structured output. The bridge adds `--output-format json` internally, rejects unparseable output, and returns valid JSON text. The requested schema remains part of the prompt contract and must be checked by the supervisor.
 
 ### `agy_start` and `agy_status`
 
-Use `agy_start` only for explicit parallel worktree collaboration. Poll the returned job id with `agy_status`.
+Use `agy_start` only with an explicit existing `workdir` pointing to a caller-created isolated worktree. The bridge does not create Git worktrees. Poll the returned job id with `agy_status`.
 
 | State | Meaning |
 | --- | --- |

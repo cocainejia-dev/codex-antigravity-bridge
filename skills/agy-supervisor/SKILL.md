@@ -29,13 +29,17 @@ the requested report fields. The copyable template, risk matrix, result state
 machine, lifecycle checklist, correction protocol, and pressure cases are in
 [`references/agy-supervisor-protocol.md`](references/agy-supervisor-protocol.md).
 Parallel worktree plans live under `docs/agy-plans/` and start with
-`Status: READY_FOR_AGY`; inspect `git worktree list` before and after delegation.
+`Status: READY_FOR_AGY`; create and validate the caller-owned AGY worktree,
+pass it as `workdir` to `agy_start`, and inspect `git worktree list` before and
+after delegation. The bridge does not create worktrees for `agy_start`.
 
 ### Tool and output rules
 
 - Apply the same scope and permission contract to `agy_ask`, `agy_ask_json`, and
   `agy_start`; `agy_ask_json` additionally requires parseable JSON matching the
   requested output schema.
+- `agy_start` requires an existing caller-created isolated worktree as `workdir`;
+  an empty or non-directory workdir is rejected.
 - `dangerously_skip_permissions=false` is the default. Enable it only after
   explicit authorization for the exact trusted worktree and task.
 - `agy_status` may report `queued`, `running`, `completed`, `failed`, or

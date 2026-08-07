@@ -134,8 +134,10 @@ the same worktree or file.
 1. Create `docs/agy-plans/YYYY-MM-DD-<slug>.md` from the plan template, fill
    ownership, worktrees, forbidden operations, acceptance criteria, tests,
    permission setting, and stop conditions, then set `Status: READY_FOR_AGY`.
-2. Commit the plan, create the isolated branch/worktree, and start AGY with
-   `agy_start` using the assigned worktree as `workdir`.
+2. Commit the plan, create and validate the isolated branch/worktree, and start
+   AGY with `agy_start` using the assigned worktree as `workdir`. The bridge
+   does not create or validate Git worktrees beyond requiring an existing
+   directory; the supervisor owns that boundary check.
 3. Poll the returned job id with `agy_status` while Codex works elsewhere.
 4. Audit the AGY worktree, tests, and diff; merge only after acceptance passes.
 

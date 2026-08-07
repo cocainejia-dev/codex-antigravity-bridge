@@ -67,3 +67,24 @@ def test_run_agy_uses_ascii_workdir_alias_for_non_ascii_windows_workdir(monkeypa
     assert result.text == "OK"
     assert "--add-dir" not in captured["args"]
     assert captured["workdir"] == "C:\\WORKSP~1\\CODEX~2"
+
+
+def test_run_agy_retries_when_direct_output_is_only_tui_chrome(monkeypatch):
+    captured = {"pty_calls": 0}
+
+    def fake_run(args, workdir, timeout):
+        return subprocess.CompletedProcess(args, 0, "\x1b[?25l", "")
+
+    def fake_pty(args, workdir, timeout):
+        captured["pty_calls"] += 1
+        return "RECOVERED", 0
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_with_pty", fake_pty)
+
+    result = run_agy("Say hi")
+
+    assert result.text == "RECOVERED"
+    assert result.used_pty is True
+    assert captured["pty_calls"] == 1

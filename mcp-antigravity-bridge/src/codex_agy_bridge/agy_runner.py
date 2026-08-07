@@ -144,9 +144,10 @@ def run_agy(
             pty_workdir = None
 
     direct = _run_subprocess(args, launch_workdir, timeout)
-    if direct.stdout:
+    direct_text = clean_agy_output(direct.stdout)
+    if direct_text:
         return AgyResult(
-            text=clean_agy_output(direct.stdout),
+            text=direct_text,
             exit_code=direct.returncode,
             used_pty=False,
         )
