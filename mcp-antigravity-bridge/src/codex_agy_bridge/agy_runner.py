@@ -103,6 +103,7 @@ class AgyResult:
     text: str
     exit_code: int
     used_pty: bool = False
+    stderr: str = ""
 
 
 def run_agy(
@@ -145,15 +146,48 @@ def run_agy(
 
     direct = _run_subprocess(args, launch_workdir, timeout)
     direct_text = clean_agy_output(direct.stdout)
+    direct_stderr = clean_agy_output(direct.stderr)
     if direct_text:
         return AgyResult(
             text=direct_text,
             exit_code=direct.returncode,
             used_pty=False,
+            stderr=direct_stderr,
         )
 
-    pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout)
-    return AgyResult(text=clean_agy_output(pty_text), exit_code=exit_code, used_pty=True)
+    try:
+        pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout)
+    except TimeoutError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - preserve the direct failure context.
+        fallback_text = direct_stderr or f"agy produced no output; PTY fallback failed: {exc}"
+        return AgyResult(
+            text=fallback_text,
+            exit_code=direct.returncode if direct.returncode != 0 else -1,
+            used_pty=True,
+            stderr=direct_stderr,
+        )
+
+    cleaned_pty_text = clean_agy_output(pty_text)
+    if cleaned_pty_text:
+        return AgyResult(
+            text=cleaned_pty_text,
+            exit_code=direct.returncode if exit_code == -1 else exit_code,
+            used_pty=True,
+            stderr=direct_stderr,
+        )
+
+    fallback_exit_code = (
+        direct.returncode
+        if direct.returncode != 0
+        else (exit_code if exit_code != 0 else -1)
+    )
+    return AgyResult(
+        text=direct_stderr or "agy produced no output; PTY fallback was unavailable",
+        exit_code=fallback_exit_code,
+        used_pty=True,
+        stderr=direct_stderr,
+    )
 
 
 def _run_subprocess(args: list[str], workdir: Optional[str], timeout: float) -> subprocess.CompletedProcess:

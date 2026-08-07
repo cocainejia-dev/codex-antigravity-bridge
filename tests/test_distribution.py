@@ -57,8 +57,18 @@ def test_readme_documents_install_and_supervision() -> None:
         "agy_ask",
         "agy_start",
         "agy_status",
-        "supervisor mode",
-        "multi-page",
+        "监督模式",
+        "多页面协同",
         "docs/agy-plans",
     ):
         assert phrase in readme
+
+
+def test_installers_support_per_user_proxy_configuration() -> None:
+    windows_installer = (ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    posix_installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    for phrase in ("ProxyUrl", "HTTP_PROXY", "HTTPS_PROXY", "mcp_servers.codex-agy-bridge.env"):
+        assert phrase in windows_installer
+    for phrase in ("PROXY_URL", "HTTP_PROXY", "HTTPS_PROXY", "mcp_servers.codex-agy-bridge.env"):
+        assert phrase in posix_installer

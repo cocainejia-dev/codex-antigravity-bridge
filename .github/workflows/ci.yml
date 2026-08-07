@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: mcp-antigravity-bridge/pyproject.toml
+
+      - name: Install bridge and test dependencies on Windows
+        if: runner.os == 'Windows'
+        run: python -m pip install -e ".\mcp-antigravity-bridge[dev,winpty]"
+
+      - name: Install bridge and test dependencies on POSIX
+        if: runner.os != 'Windows'
+        run: python -m pip install -e "./mcp-antigravity-bridge[dev]"
+
+      - name: Run repository tests
+        run: python -m pytest -q
+
+      - name: Run bridge tests
+        working-directory: mcp-antigravity-bridge
+        run: python -m pytest -q
+
+      - name: Validate skill package
+        run: python scripts/validate_skill.py
+
+      - name: Compile bridge sources
+        working-directory: mcp-antigravity-bridge
+        run: python -m compileall -q src
+
+      - name: Check patch whitespace
+        run: git diff --check

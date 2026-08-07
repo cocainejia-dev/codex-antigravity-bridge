@@ -88,3 +88,38 @@ def test_run_agy_retries_when_direct_output_is_only_tui_chrome(monkeypatch):
     assert result.text == "RECOVERED"
     assert result.used_pty is True
     assert captured["pty_calls"] == 1
+
+
+def test_run_agy_preserves_direct_stderr_when_pty_has_no_output(monkeypatch):
+    def fake_run(args, workdir, timeout):
+        return subprocess.CompletedProcess(args, 7, "", "authentication failed")
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr(
+        "codex_agy_bridge.agy_runner._run_with_pty",
+        lambda args, workdir, timeout: ("", -1),
+    )
+
+    result = run_agy("Say hi")
+
+    assert result.text == "authentication failed"
+    assert result.stderr == "authentication failed"
+    assert result.exit_code == 7
+
+
+def test_run_agy_classifies_empty_direct_and_pty_output_as_failure(monkeypatch):
+    def fake_run(args, workdir, timeout):
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr(
+        "codex_agy_bridge.agy_runner._run_with_pty",
+        lambda args, workdir, timeout: ("", 0),
+    )
+
+    result = run_agy("Say hi")
+
+    assert result.exit_code == -1
+    assert "no output" in result.text

@@ -8,7 +8,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .agy_jobs import agy_jobs
-from .agy_runner import run_agy
+from .agy_runner import AgyResult, run_agy
 
 mcp = FastMCP(
     "codex-agy-bridge",
@@ -22,6 +22,13 @@ mcp = FastMCP(
         "authorizes that exact trusted worktree and task."
     ),
 )
+
+
+def _require_success(result: AgyResult) -> AgyResult:
+    if result.exit_code != 0:
+        detail = result.text or result.stderr or "agy returned no diagnostic output"
+        raise RuntimeError(f"agy exited with code {result.exit_code}: {detail}")
+    return result
 
 
 @mcp.tool()
@@ -45,7 +52,7 @@ def agy_ask(
         timeout=timeout,
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
-    return result.text
+    return _require_success(result).text
 
 
 @mcp.tool()
@@ -66,8 +73,7 @@ def agy_ask_json(
         output_format="json",
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
-    if result.exit_code != 0:
-        raise RuntimeError(f"agy exited with code {result.exit_code}: {result.text}")
+    _require_success(result)
     try:
         json.loads(result.text)
     except json.JSONDecodeError as exc:

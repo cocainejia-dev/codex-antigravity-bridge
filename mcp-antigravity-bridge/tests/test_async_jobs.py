@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from codex_agy_bridge.agy_jobs import AgyJobRegistry
 from codex_agy_bridge.agy_runner import AgyResult
 
@@ -75,3 +77,34 @@ def test_status_reports_nonzero_exit_as_failed(monkeypatch):
         "exit_code": 1,
         "used_pty": False,
     }
+
+
+def test_completed_jobs_are_pruned_after_retention(monkeypatch):
+    monkeypatch.setattr(
+        "codex_agy_bridge.agy_jobs.run_agy",
+        lambda *args, **kwargs: AgyResult(text="DONE", exit_code=0, used_pty=False),
+    )
+    registry = AgyJobRegistry(retention_seconds=0.05)
+    try:
+        job_id = registry.start("Implement page")
+        for _ in range(20):
+            if registry.status(job_id)["state"] == "completed":
+                break
+            time.sleep(0.01)
+        time.sleep(0.1)
+        assert registry.cleanup() == 1
+        assert registry.status(job_id)["state"] == "unknown"
+    finally:
+        registry.close()
+
+
+def test_closed_registry_rejects_new_jobs(monkeypatch):
+    monkeypatch.setattr(
+        "codex_agy_bridge.agy_jobs.run_agy",
+        lambda *args, **kwargs: AgyResult(text="DONE", exit_code=0, used_pty=False),
+    )
+    registry = AgyJobRegistry()
+    registry.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        registry.start("Implement page")

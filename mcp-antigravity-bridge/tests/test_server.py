@@ -17,6 +17,19 @@ def test_agy_ask_json_rejects_unparseable_output(monkeypatch):
         server.agy_ask_json("Return JSON")
 
 
+def test_agy_ask_rejects_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "run_agy",
+        lambda *args, **kwargs: AgyResult(
+            text="authentication failed", exit_code=7, stderr="authentication failed"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="code 7.*authentication failed"):
+        server.agy_ask("Say hi")
+
+
 def test_agy_ask_json_returns_parseable_json(monkeypatch):
     monkeypatch.setattr(
         server,
