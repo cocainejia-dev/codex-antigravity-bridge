@@ -1,54 +1,47 @@
 <div align="center">
 
-# Codex &lt;-&gt; Antigravity Bridge
+# Codex <-> Antigravity Bridge
 
-让 Codex 负责规划与验收，让 Google Antigravity `agy` 负责受控实现，在同一个项目中安全协同开发。
+让 Codex 负责规划与验收，让 Google Antigravity `agy` 负责受控实现。
 
 <p>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-111827?style=flat-square" alt="MCP stdio"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-local%20stdio-111827?style=flat-square" alt="Local MCP stdio"></a>
   <a href="https://github.com/google-antigravity/antigravity-cli"><img src="https://img.shields.io/badge/Antigravity-agy%20CLI-4285F4?style=flat-square&logo=google&logoColor=white" alt="Antigravity agy CLI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-16a34a?style=flat-square" alt="Apache 2.0 license"></a>
 </p>
 
-📘 [English technical guide](mcp-antigravity-bridge/README.md)
+<p>
+  <strong>Plan with Codex. Implement with agy. Review everything.</strong>
+</p>
+
+📘 [English bridge guide](mcp-antigravity-bridge/README.md)
 
 </div>
 
-## Contents
+## 这是什么？
 
-- [一句话说明](#-一句话说明)
-- [快速开始](#️-快速开始)
-- [监工模式](#-codex-监工模式supervisor-mode)
-- [多页面协同](#-多页面协同开发multi-page)
-- [工具](#-四个工具)
-- [验证](#-验证)
-
-## 🚀 一句话说明
-
-这是一个本地 MCP server：Codex 调用 `agy_ask` 或 `agy_ask_json`，bridge 在后台启动 `agy -p`，再把干净的文本结果返回给 Codex。
-
-当前的调用路径是：
+这是一个本地 MCP server，让 Codex 可以在受控范围内调用 Antigravity 的 headless CLI。它不启动、嵌入或控制 Antigravity 桌面 GUI，也不引入 Web server 或数据库。
 
 ```mermaid
 flowchart LR
-    C[Codex Desktop / CLI] -->|MCP stdio| B[codex-agy-bridge]
+    C[Codex Desktop / CLI] -->|MCP over local stdio| B[codex-agy-bridge]
     B -->|subprocess / ConPTY| A[agy -p]
     A --> G[Antigravity agent]
 ```
 
-> **边界提醒：** 本项目调用的是 Antigravity 的 headless CLI，不会启动、嵌入或控制 Antigravity 桌面 GUI。
+### 适合什么场景？
 
-## ✨ 为什么用它？
+- 让 Codex 把一个清晰、可验收的子任务委派给 `agy`。
+- 在独立 Git worktree 中异步实现多个互不冲突的页面或模块。
+- 保留 Codex 对范围、权限、diff、测试和最终合并的控制权。
+- 在 Windows 中文路径、空输出和 PTY 场景下保持更稳定的 CLI 调用。
 
-- **接入方式原生**：注册为 MCP server 后，Codex Desktop 和 Codex CLI 都可以使用。
-- **CLI-first**：复用 `agy` 自己的登录、工作区和权限流程。
-- **Windows 友好**：处理中文工作目录，并在直接输出为空时尝试 ConPTY。
-- **足够小**：本地 stdio、四个工具、没有 Web server，也没有数据库。
+## 快速开始
 
-## 🛠️ 快速开始
+### 1. 安装仓库
 
-### Windows PowerShell
+Windows PowerShell：
 
 ```powershell
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
@@ -56,7 +49,7 @@ cd codex-antigravity-bridge
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-### macOS / Linux
+macOS / Linux：
 
 ```bash
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
@@ -64,85 +57,80 @@ cd codex-antigravity-bridge
 sh scripts/install.sh
 ```
 
-安装脚本会安装本地 bridge、复制 `agy-supervisor` skill，并在 Codex 中幂等注册
-`codex-agy-bridge`。脚本不会替用户安装或保存 Antigravity 凭据。
+安装脚本会：
 
-安装 Antigravity CLI 后，在交互式终端运行一次：
+1. 以 editable 方式安装本地 bridge。
+2. 安装 `agy-supervisor` skill。
+3. 幂等注册 `codex-agy-bridge` MCP server。
 
-Windows PowerShell 安装命令：
+脚本不会安装或保存 Antigravity OAuth 凭据。
+
+### 2. 安装并登录 `agy`
+
+Windows PowerShell：
 
 ```powershell
 irm https://antigravity.google/cli/install.ps1 | iex
-```
-
-macOS/Linux 请按照 [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview) 安装。
-
-然后在交互式终端运行一次：
-
-```powershell
+agy --version
 agy
 ```
 
-按照提示完成登录。登录状态由 `agy` 自己保存，通常同一台机器、同一用户只需登录一次；令牌过期、退出登录、清理系统凭据或更换机器后可能需要重新登录。
+按照交互式提示完成登录。macOS / Linux 请参考 [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview)。登录状态由 `agy` 自己管理。
 
-验证 CLI：
+### 3. 验证连接
 
 ```powershell
 agy -p "Reply exactly AGY_OK"
 codex mcp list
 ```
 
-如果只想手动安装 bridge，请参阅 [bridge 技术文档](mcp-antigravity-bridge/README.md)。
+看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，就可以在 Codex 中调用 bridge 了。
 
-## 🧰 四个工具
+## 四个 MCP 工具
 
-| 工具 | 签名 | 适合场景 |
+| 工具 | 用途 | 返回 |
 | --- | --- | --- |
-| `agy_ask` | `agy_ask(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 普通文本任务，例如检查代码、解释文件或执行一个受控的小任务。 |
-| `agy_ask_json` | `agy_ask_json(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 需要结构化 CLI 输出的任务；内部会增加 `--output-format json`。 |
-| `agy_start` | `agy_start(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 在独立 worktree 中异步启动 `agy`，让 Codex 继续开发。 |
-| `agy_status` | `agy_status(job_id)` | 查询异步 `agy` 任务状态和结果。 |
+| `agy_ask` | 执行一次受控的同步 CLI 任务 | 清理后的文本结果 |
+| `agy_ask_json` | 请求结构化 CLI 输出 | JSON 输出文本 |
+| `agy_start` | 在独立 worktree 中异步启动任务 | `job_id` |
+| `agy_status` | 查询异步任务 | 状态与结果 JSON |
 
-同步工具最终会调用 `agy -p "你的 prompt"`；异步工具会返回 job id，让 Codex 继续在另一个 worktree 工作。示例请求：
+常用调用：
 
 ```text
-Use agy_ask once. Ask Antigravity to inspect README.md and return three concrete documentation improvements. Use the repository root as workdir and keep the task read-only.
+Use agy_ask once. Inspect README.md and return three concrete documentation improvements.
+Keep the task read-only, use the repository root as workdir, and do not modify files.
 ```
 
-参数说明：
+参数默认值：
 
-- `prompt`：交给 Antigravity 的任务说明。
-- `workdir`：可选工作目录；空字符串表示继承当前目录。
-- `timeout`：硬超时时间，单位为秒，默认 `300.0`。
-- `dangerously_skip_permissions`：默认 `false`；仅在 prompt、目录和操作范围都可信时启用。
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `prompt` | 必填 | 交给 Antigravity 的任务说明 |
+| `workdir` | `""` | 空字符串表示继承当前目录 |
+| `timeout` | `300.0` | 硬超时时间，单位为秒 |
+| `dangerously_skip_permissions` | `false` | 仅在明确授权的可信任务中启用 |
 
-## 🧭 Codex 监工模式（supervisor mode）
+## Supervisor 模式
 
-安装 `agy-supervisor` skill 后，Codex 有两种工作模式：
+安装 `agy-supervisor` skill 后，Codex 仍然是监督者，`agy` 只是受控实现者。
 
-- **普通模式**：普通的开发、修 bug 或重构请求由 Codex 自己完成，不会自动调用 `agy`。
-- **监工模式**：只有用户明确说“让 agy/Antigravity 协作”，或明确开启本次任务的协作模式时，Codex 才会调用 `agy_ask`。
+- 普通开发请求不会自动调用 `agy`。
+- 只有用户明确要求 Antigravity 协作，或明确开启本次 supervisor mode，才会委派。
+- Codex 负责任务拆分、文件边界、权限检查、diff 审查和测试验收。
+- `agy` 负责一个范围清晰的一次性子任务。
+- 每个子任务最多三次调用：首次实现加两次纠正；测试通过、越界、无进展、超时或需要用户决定时停止。
 
-监工模式下，Codex 负责拆分任务、指定项目目录和文件边界、验收 diff 与测试；`agy` 负责实现具体的受控子任务。每次调用都是独立的一次性任务，Codex 通过 diff、测试输出和修正提示维持上下文。
-
-示例：
+明确授权示例：
 
 ```text
-开启监工模式，让 Antigravity 在当前项目中实现用户设置页。
+开启 supervisor mode。让 Antigravity 在当前项目实现用户设置页。
 只允许修改 settings 页面及其专属组件，完成后运行相关测试。
 ```
 
-下列请求不会自动调用 `agy`：
+## 多页面协同（multi-page）
 
-```text
-请修复登录页面的按钮样式。
-```
-
-除非用户在请求中明确授权 Antigravity 协作。
-
-## 🧩 多页面协同开发（multi-page）
-
-多页面任务适合让 Codex 和 `agy` 在独立 worktree 中同时实现。Codex 会先确定共享路由、组件、状态和数据接口，生成计划书，再分配任务。例如：
+只有在页面能够独立实现、共享契约已经明确、文件边界互斥且工作区没有并发写入时，才适合使用异步 worktree 协同：
 
 ```text
 页面 1：dashboard/，只允许修改 dashboard 页面和专属组件
@@ -150,26 +138,17 @@ Use agy_ask once. Ask Antigravity to inspect README.md and return three concrete
 页面 3：reports/，只允许修改 reports 页面和专属组件
 ```
 
-只有满足以下条件才会进入多页面协同：
+计划会写入 `docs/agy-plans/`。Codex 在自己的 worktree 中继续工作，之后检查 `agy_status`、diff 和测试结果，再决定是否合并。
 
-- 至少两个页面可以独立实现；
-- 共享接口、路由和组件约定已经明确；
-- 每个页面有独立的文件边界和验收标准；
-- 当前工作区没有其他进程同时修改相关文件。
+## 配置与 Windows 支持
 
-Codex 会把计划书写到 `docs/agy-plans/`，然后执行 `git worktree add` 创建独立的 AGY 工作区。`agy_start` 返回任务 ID 后，Codex 可以继续在自己的 worktree 开发；任务完成后通过 `agy_status` 查询、检查 diff 和测试，再决定是否合并。每个子任务最多执行三次调用：首次实现加两次修正；测试通过、超出范围、连续无进展、超时或需要用户决定时立即停止。
+推荐使用 Codex CLI 注册：
 
-## 🔐 协作限制
+```powershell
+codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
+```
 
-- 不会把密钥、OAuth 材料或私有 Codex 配置传给 `agy`。
-- 不自动委托生产操作、不可逆操作、跨项目写入或范围不明的任务。
-- `dangerously_skip_permissions` 默认关闭，只有用户明确授权可信目录和任务时才开启。
-- 页面之间存在未解决的共享状态、认证、数据库或路由耦合时，不会自动拆分委托。
-- 监工发现 `agy` 修改了禁止文件、需要重新登录、输出为空或超时，会停止并报告问题，不会无限重试。
-
-## ⚙️ 手动配置
-
-推荐使用 `codex mcp add`。如果需要写入机器级 Codex 配置，可以使用：
+手动配置：
 
 ```toml
 [mcp_servers.codex-agy-bridge]
@@ -178,80 +157,74 @@ args = ["-m", "codex_agy_bridge"]
 startup_timeout_sec = 120
 ```
 
-如果 `agy` 不在 `PATH` 中，可以显式指定：
+如果 `agy` 不在 `PATH`：
 
 ```powershell
 $env:AGY_PATH = "C:\path\to\agy.exe"
 ```
 
-如果 Codex Desktop 找不到 Python，请把 `command` 换成 Python 的绝对路径。
-
-## 🪟 Windows 注意事项
-
-- 安装 `[winpty]` extra，启用空输出场景的 ConPTY fallback：`python -m pip install -e ".[winpty]"`。
-- 尽量把 Codex MCP 的启动命令放在 ASCII 路径下。
-- 把真实项目目录传给工具的 `workdir`；bridge 会处理非 ASCII Windows 路径。
-- 如果 `agy` 在交互式终端能运行、在 Codex 中却失败，请检查 `AGY_PATH`、继承的环境变量和 CLI 登录状态。
-
-## 🔐 安全边界
-
-- bridge 只通过本地 stdio MCP 与 Codex 通信。
-- `dangerously_skip_permissions` 默认是 `false`。
-- headless 权限跳过会让 `agy` 不再等待交互确认，只应对可信 prompt、可信目录和可逆操作使用。
-- 不要把 Antigravity OAuth 材料、代理凭据或私有 Codex 配置提交到 Git。
-
-## 🧪 验证
-
-在 `mcp-antigravity-bridge/` 目录运行：
+Windows 下建议安装 ConPTY fallback：
 
 ```powershell
+python -m pip install -e ".\mcp-antigravity-bridge[winpty]"
+```
+
+把真实项目目录传给工具的 `workdir`，不要把机器专属路径硬编码进 MCP 配置。bridge 会处理非 ASCII 工作目录；如果直接 stdout 为空，会尝试 ConPTY。
+
+## 安全边界
+
+- 通信只经过本地 MCP stdio。
+- `dangerously_skip_permissions` 默认关闭。
+- 不自动委托生产操作、不可逆操作、跨项目写入或范围不明的任务。
+- 不把 OAuth 材料、密钥、代理凭据或私有 Codex 配置传给 `agy`。
+- `agy` 修改了禁止文件、输出为空、超时或要求人工决定时，监督流程会停止并报告，而不是无限重试。
+
+## 验证
+
+bridge 单元测试不会要求真实 Antigravity 登录：
+
+```powershell
+cd mcp-antigravity-bridge
 python -m pytest -q
 python -m compileall -q src
 ```
 
-这些单元测试会 mock 进程边界，不需要真实的 Antigravity 登录。需要做分层真机检查时，可以依次执行：
+仓库级 skill 和分发检查：
 
 ```powershell
-agy -p "Reply exactly DIRECT_AGY_OK" --dangerously-skip-permissions
-codex mcp list
+cd ..
+python -m pytest -q
+python scripts/validate_skill.py
+git diff --check
 ```
 
-然后在 Codex Desktop 中用一个小型、可逆的任务调用 `agy_ask`。
-
-## 🧭 项目结构
+## 项目结构
 
 ```text
 .
-├── mcp-antigravity-bridge/
-│   ├── src/codex_agy_bridge/
-│   │   ├── agy_runner.py
-│   │   ├── agy_jobs.py
-│   │   ├── server.py
-│   │   └── __main__.py
-│   ├── tests/
-│   │   ├── test_smoke.py
-│   │   └── test_async_jobs.py
-│   ├── examples/codex-config.toml
-│   └── pyproject.toml
-├── research/
-├── skills/agy-supervisor/
-├── scripts/
-├── tests/test_distribution.py
-├── docs/superpowers/
+├── mcp-antigravity-bridge/       # 本地 MCP runtime
+├── skills/agy-supervisor/        # Codex supervisor skill
+├── scripts/                      # 安装与验证脚本
+├── tests/                        # skill 与分发回归测试
+├── docs/superpowers/             # 设计与执行记录
+├── research/                     # 研究资料与历史比较
 ├── PROGRESS.md
 ├── LICENSE
 └── README.md
 ```
 
-`research/` 保存资料和历史比较；当前支持的运行时就是 `mcp-antigravity-bridge/`。
+## 文档导航
 
-## 🔗 参考资料
+- [Bridge English technical guide](mcp-antigravity-bridge/README.md)
+- [Supervisor skill](skills/agy-supervisor/SKILL.md)
+- [验证脚本](scripts/validate_skill.py)
+- [项目进度](PROGRESS.md)
+
+## 参考资料
 
 - [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli)
-- [Antigravity CLI documentation](https://antigravity.google/docs/cli/overview)
+- [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
-- [agy-headless-bridge](https://github.com/rhishi99/agy-headless-bridge)
-- [agy-bridge](https://github.com/sshahzaiib/agy-bridge)
 
 ## License
 
