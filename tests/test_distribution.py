@@ -100,6 +100,29 @@ def test_readmes_document_all_runtime_modes() -> None:
         assert phrase in english
 
 
+def test_homepage_navigation_links_have_explicit_targets() -> None:
+    navigation = {
+        ROOT / "README.md": (
+            "quick-start",
+            "mode-overview",
+            "tools",
+            "supervisor-mode",
+        ),
+        ROOT / "README.en.md": (
+            "quick-start",
+            "runtime-modes",
+            "collaboration-rules",
+            "documentation-map",
+        ),
+    }
+
+    for path, anchors in navigation.items():
+        readme = path.read_text(encoding="utf-8")
+        for anchor in anchors:
+            assert f'href="#{anchor}"' in readme
+            assert f'<a id="{anchor}"></a>' in readme
+
+
 def test_progress_documents_runtime_modes_and_lifecycle() -> None:
     progress = (ROOT / "PROGRESS.md").read_text(encoding="utf-8")
 

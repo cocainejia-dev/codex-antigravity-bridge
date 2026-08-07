@@ -14,10 +14,10 @@
 <p><strong>规划清晰 · 授权明确 · 验收完整</strong></p>
 
 <p>
-  <a href="#快速开始">快速开始</a> ·
-  <a href="#模式总览">模式总览</a> ·
-  <a href="#六个工具">工具</a> ·
-  <a href="#监督模式">监督模式</a> ·
+  <a href="#quick-start">快速开始</a> ·
+  <a href="#mode-overview">模式总览</a> ·
+  <a href="#tools">工具</a> ·
+  <a href="#supervisor-mode">监督模式</a> ·
   <a href="README.en.md">英文项目首页</a> ·
   <a href="docs/README.md">文档索引</a>
 </p>
@@ -39,6 +39,8 @@ flowchart LR
     B -->|子进程 / ConPTY| A[agy -p]
     A --> G[Antigravity 执行器]
 ```
+
+<a id="mode-overview"></a>
 
 ## 🧭 模式总览
 
@@ -97,6 +99,8 @@ Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
 </tr>
 </table>
 
+<a id="quick-start"></a>
+
 ## 🚀 快速开始
 
 ### 01 · 安装仓库
@@ -147,6 +151,8 @@ codex mcp list
 ```
 
 看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，就可以在 Codex 中使用它。
+
+<a id="tools"></a>
 
 ## 🧰 六个工具
 
@@ -220,6 +226,8 @@ agy_collab_start(
 | `workdir` | `""` | 空字符串表示继承当前目录 |
 | `timeout` | `300.0` | 硬超时时间，单位为秒 |
 | `dangerously_skip_permissions` | `false` | 仅在明确授权的可信任务中启用 |
+
+<a id="supervisor-mode"></a>
 
 ## 🛡️ 监督模式
 

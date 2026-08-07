@@ -12,6 +12,13 @@
 </p>
 
 <p>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#runtime-modes">Runtime modes</a> ·
+  <a href="#collaboration-rules">Collaboration rules</a> ·
+  <a href="#documentation-map">Documentation map</a>
+</p>
+
+<p>
   <a href="PROGRESS.en.md">English progress</a> ·
   <a href="docs/README.en.md">Documentation index</a> ·
   <a href="mcp-antigravity-bridge/README.md">Runtime technical manual</a>
@@ -41,6 +48,8 @@ codex-agy-bridge
 agy -p "..."
 ```
 
+<a id="runtime-modes"></a>
+
 ## Runtime Modes
 
 The project has four runtime modes:
@@ -55,6 +64,8 @@ The project has four runtime modes:
 `headless` and `terminal` are display options, not additional runtime modes.
 Headless is the default. On Windows, the opt-in terminal mode opens one visible
 console per running task and shows live agy output.
+
+<a id="quick-start"></a>
 
 ## Quick Start
 
@@ -77,6 +88,8 @@ agy
 For the complete installation, proxy, tool, Windows, collaboration, and
 troubleshooting instructions, read the [runtime technical manual](mcp-antigravity-bridge/README.md).
 
+<a id="collaboration-rules"></a>
+
 ## Collaboration Rules
 
 Before starting collaboration, Codex asks whether the user wants live terminal
@@ -94,6 +107,8 @@ Owned paths must not overlap. The bridge creates one temporary branch, worktree,
 and agy process per task. It never auto-merges, deletes worktrees, or runs
 arbitrary verification commands. `ready_for_review` means that agy exited
 successfully; Codex must still inspect the diff and run acceptance checks.
+
+<a id="documentation-map"></a>
 
 ## Documentation Map
 
