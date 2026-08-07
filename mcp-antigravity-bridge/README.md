@@ -17,7 +17,10 @@ An MCP server that lets Codex call Google's Antigravity `agy` CLI headlessly.
 
 ## 🚀 What it does
 
-`codex-agy-bridge` exposes two local MCP tools. Codex calls one of them, the bridge starts `agy -p` as a headless child process, and the cleaned result is returned to the MCP client.
+`codex-agy-bridge` exposes four local MCP tools. The synchronous tools run a
+bounded `agy -p` call and return its cleaned result. The asynchronous tools
+start a background call and let Codex continue work in a separate Git
+worktree.
 
 The supported integration is:
 
@@ -43,7 +46,7 @@ This project does **not** launch, embed, or control the Antigravity desktop GUI.
 - **Native Codex integration:** register it as an MCP server and use it from Codex Desktop or Codex CLI.
 - **CLI-first:** reuse `agy`'s own login, workspace, and permission flow.
 - **Windows-aware:** support non-ASCII workdirs and retry through ConPTY when direct output is empty.
-- **Small surface area:** two tools, local stdio transport, no web server, database, or SDK runtime.
+- **Small surface area:** four tools, local stdio transport, no web server, database, or SDK runtime.
 
 ## 🛠️ Prerequisites
 
@@ -137,6 +140,13 @@ agy_ask_json(
 
 Use it when the prompt asks Antigravity for structured output. Internally this adds `--output-format json` to the `agy` command; the tool still returns the result as text.
 
+### `agy_start` and `agy_status`
+
+Use `agy_start` for explicit parallel worktree collaboration. It returns a job
+id immediately; poll that id with `agy_status` while Codex works in another
+worktree. The job status is JSON text with `queued`, `running`, `completed`,
+`failed`, or `unknown` state.
+
 ### Parameters
 
 | Parameter | Meaning |
@@ -153,12 +163,13 @@ the bounded implementer. It is intentionally opt-in: ordinary development
 requests do not call `agy`. Codex calls `agy_ask` only after the user explicitly
 requests Antigravity collaboration or enables supervisor mode.
 
-For multi-page work, Codex first fixes the shared contracts, assigns exclusive
-file boundaries, delegates pages sequentially in one workdir, and checks each
-diff and test result. A task has at most three total calls, including two
-correction calls after the initial implementation. The skill does not enable
-concurrent writes, production operations, secret handling, or irreversible
-actions.
+For multi-page work, Codex first fixes the shared contracts, writes a plan to
+`docs/agy-plans/`, assigns exclusive file boundaries, creates an AGY worktree,
+and starts AGY asynchronously. Codex continues in its own worktree, then
+reviews and merges the AGY branch. A delegated task has at most three total
+AGY calls, including two correction calls after the initial implementation.
+The skill does not allow same-file concurrent writes, production operations,
+secret handling, or irreversible actions.
 
 ## 🧭 How the runner works
 

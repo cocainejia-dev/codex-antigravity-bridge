@@ -18,6 +18,8 @@ conversation state, or store OAuth credentials.
 
 The repository remains the source of truth for the MCP bridge. A skill under
 `skills/agy-supervisor/` describes the delegation protocol that Codex follows.
+The bridge exposes synchronous `agy_ask` tools and asynchronous
+`agy_start`/`agy_status` tools for independent worktree execution.
 The protocol has two modes:
 
 - **Normal mode:** Codex completes the task itself and does not call `agy`.
@@ -36,12 +38,13 @@ login.
 1. Inspect the repository and establish the task scope, working directory,
    acceptance criteria, relevant tests, and files that are out of scope.
 2. Decide whether the task is eligible for delegation.
-3. Send one bounded prompt to `agy_ask` with the exact `workdir`, allowed
-   files, forbidden files, expected changes, and verification commands.
+3. Send one bounded prompt to `agy_ask` or `agy_start` with the exact
+   `workdir`, allowed files, forbidden files, expected changes, and verification
+   commands.
 4. Inspect `git diff`, status, test output, and whether changes stayed in scope.
 5. Accept the result, send a corrective prompt, or stop and report a blocker.
-6. For multiple pages, repeat this sequentially per page and run integration
-   checks after all page tasks complete.
+6. For multiple pages, create independent worktrees, run disjoint Codex and
+   AGY tracks in parallel, and run integration checks after both tracks complete.
 
 The supervisor must cap correction attempts at three per subtask. It must stop
 when tests pass and acceptance criteria are met, when the agent makes no
@@ -54,11 +57,11 @@ Delegation is eligible when at least two pages are independently implementable,
 shared routes/components and data contracts are known, each page has a clear
 acceptance checklist, and no other process is editing the same files.
 
-Codex must establish shared contracts first. It must then assign each page an
-exclusive file ownership boundary and run page tasks sequentially in the
-shared worktree. Parallel calls are not enabled by default because the bridge
-uses one `workdir`; true parallelism requires separate Git worktrees and an
-explicit future workflow.
+Codex must establish shared contracts first. It must then assign each track an
+exclusive file ownership boundary, create an AGY worktree and branch, start
+AGY asynchronously, and continue in its own worktree. Parallel calls are only
+allowed when every writer has a separate worktree and no file ownership
+overlaps.
 
 Do not delegate page work when pages share unresolved state, routing, auth, or
 database changes; when the architecture is still undecided; or when a page

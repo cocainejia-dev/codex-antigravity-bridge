@@ -44,6 +44,8 @@ Antigravity agent
 - Added the `agy-supervisor` skill with explicit opt-in, bounded delegation, and multi-page supervision rules.
 - Added Windows and POSIX installers that install the bridge, copy the skill, and register MCP idempotently.
 - Added GitHub quick-start documentation and distribution validation tests.
+- Added asynchronous `agy_start`/`agy_status` tools for independent worktree development.
+- Added the AGY plan template and parallel worktree handoff rules to `agy-supervisor`.
 
 ## Remaining Work
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from .agy_jobs import agy_jobs
 from .agy_runner import run_agy
 
 mcp = FastMCP(
@@ -11,7 +12,8 @@ mcp = FastMCP(
     instructions=(
         "Bridge from Codex to the Google Antigravity agent. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
-        "use agy_ask_json when you want structured JSON output. "
+        "use agy_ask_json when you want structured JSON output; "
+        "use agy_start and agy_status for explicit asynchronous worktree collaboration. "
         "For trusted autonomous work, pass dangerously_skip_permissions=true."
     ),
 )
@@ -60,3 +62,31 @@ def agy_ask_json(
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
     return result.text
+
+
+@mcp.tool()
+def agy_start(
+    prompt: str,
+    workdir: str = "",
+    timeout: float = 300.0,
+    dangerously_skip_permissions: bool = False,
+) -> str:
+    """Start an asynchronous agy task and return its job id.
+
+    Use this for explicit parallel worktree collaboration. Poll the returned
+    id with ``agy_status`` while Codex continues work in another worktree.
+    """
+    return agy_jobs.start(
+        prompt,
+        workdir=workdir or None,
+        timeout=timeout,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
+
+
+@mcp.tool()
+def agy_status(job_id: str) -> str:
+    """Return JSON status for an asynchronous agy task."""
+    import json
+
+    return json.dumps(agy_jobs.status(job_id), ensure_ascii=False)

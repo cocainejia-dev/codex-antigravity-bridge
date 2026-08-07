@@ -8,6 +8,16 @@
 
 **Tech Stack:** Markdown skill metadata, Python 3.10+, PowerShell, POSIX shell, Codex MCP CLI, pytest.
 
+## Post-plan extension: parallel worktree mode
+
+The release also adds asynchronous `agy_start` and `agy_status` tools, a
+reusable `skills/agy-supervisor/references/agy-development-plan.md` template,
+and parallel worktree handoff rules. Codex writes and commits a plan under
+`docs/agy-plans/`, creates `.worktrees/agy/<slug>` on branch
+`codex/agy-<slug>`, starts AGY there, and continues in its own worktree. The
+tracks must have disjoint file ownership; Codex reviews and merges the AGY
+branch only after its tests and acceptance criteria pass.
+
 ## Global Constraints
 
 - Normal coding requests must not trigger `agy` unless the user explicitly requests Antigravity collaboration or enables supervisor mode.

@@ -12,6 +12,7 @@ def test_distribution_files_exist() -> None:
     expected = (
         ROOT / "skills" / "agy-supervisor" / "SKILL.md",
         ROOT / "skills" / "agy-supervisor" / "agents" / "openai.yaml",
+        ROOT / "skills" / "agy-supervisor" / "references" / "agy-development-plan.md",
         ROOT / "scripts" / "install.ps1",
         ROOT / "scripts" / "install.sh",
         ROOT / "scripts" / "validate_skill.py",
@@ -36,7 +37,10 @@ def test_readme_documents_install_and_supervision() -> None:
     for phrase in (
         "https://github.com/crazyzhang277/codex-antigravity-bridge.git",
         "agy_ask",
+        "agy_start",
+        "agy_status",
         "supervisor mode",
         "multi-page",
+        "docs/agy-plans",
     ):
         assert phrase in readme

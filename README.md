@@ -93,12 +93,14 @@ codex mcp list
 
 如果只想手动安装 bridge，请参阅 [bridge 技术文档](mcp-antigravity-bridge/README.md)。
 
-## 🧰 两个工具
+## 🧰 四个工具
 
 | 工具 | 签名 | 适合场景 |
 | --- | --- | --- |
 | `agy_ask` | `agy_ask(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 普通文本任务，例如检查代码、解释文件或执行一个受控的小任务。 |
 | `agy_ask_json` | `agy_ask_json(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 需要结构化 CLI 输出的任务；内部会增加 `--output-format json`。 |
+| `agy_start` | `agy_start(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 在独立 worktree 中异步启动 `agy`，让 Codex 继续开发。 |
+| `agy_status` | `agy_status(job_id)` | 查询异步 `agy` 任务状态和结果。 |
 
 两个工具最终都会调用 `agy -p "你的 prompt"`。示例请求：
 
@@ -139,7 +141,7 @@ Use agy_ask once. Ask Antigravity to inspect README.md and return three concrete
 
 ## 🧩 多页面协同开发（multi-page）
 
-多页面任务适合交给 `agy` 分页面实现，但 Codex 会先确定共享路由、组件、状态和数据接口，再按页面顺序分配任务。例如：
+多页面任务适合让 Codex 和 `agy` 在独立 worktree 中同时实现。Codex 会先确定共享路由、组件、状态和数据接口，生成计划书，再分配任务。例如：
 
 ```text
 页面 1：dashboard/，只允许修改 dashboard 页面和专属组件
@@ -154,7 +156,7 @@ Use agy_ask once. Ask Antigravity to inspect README.md and return three concrete
 - 每个页面有独立的文件边界和验收标准；
 - 当前工作区没有其他进程同时修改相关文件。
 
-当前 bridge 默认在同一个 `workdir` 中顺序执行，不会让多个 `agy` 进程并发写入同一工作区。每个子任务最多执行三次调用：首次实现加两次修正；测试通过、超出范围、连续无进展、超时或需要用户决定时立即停止。
+Codex 会把计划书写到 `docs/agy-plans/`，然后执行 `git worktree add` 创建独立的 AGY 工作区。`agy_start` 返回任务 ID 后，Codex 可以继续在自己的 worktree 开发；任务完成后通过 `agy_status` 查询、检查 diff 和测试，再决定是否合并。每个子任务最多执行三次调用：首次实现加两次修正；测试通过、超出范围、连续无进展、超时或需要用户决定时立即停止。
 
 ## 🔐 协作限制
 
