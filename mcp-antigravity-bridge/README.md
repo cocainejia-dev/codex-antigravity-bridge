@@ -15,6 +15,17 @@ An MCP server that lets Codex call Google's Antigravity `agy` CLI headlessly.
 
 </div>
 
+## Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Tool API](#tool-api)
+- [Parallel Worktree Workflow](#parallel-worktree-workflow)
+- [Runtime Behavior](#runtime-behavior)
+- [Security Boundary](#security-boundary)
+- [Verification](#verification)
+- [Troubleshooting](#troubleshooting)
+
 ## 🚀 What it does
 
 `codex-agy-bridge` exposes four local MCP tools. The synchronous tools run a
@@ -24,19 +35,11 @@ worktree.
 
 The supported integration is:
 
-```text
-Codex Desktop or Codex CLI
-        |
-        | MCP over stdio
-        v
-codex-agy-bridge
-        |
-        | subprocess / ConPTY / pty
-        v
-agy -p "..."
-        |
-        v
-Antigravity agent
+```mermaid
+flowchart LR
+    C[Codex Desktop / CLI] -->|MCP stdio| B[codex-agy-bridge]
+    B -->|subprocess / ConPTY| A[agy -p]
+    A --> G[Antigravity agent]
 ```
 
 This project does **not** launch, embed, or control the Antigravity desktop GUI. It invokes the Antigravity CLI in headless mode.
@@ -175,12 +178,13 @@ secret handling, or irreversible actions.
 
 The runtime lives in `src/codex_agy_bridge/`:
 
-1. `server.py` registers `agy_ask` and `agy_ask_json` with FastMCP.
+1. `server.py` registers the four MCP tools with FastMCP.
 2. `agy_runner.py` looks for the CLI in `AGY_PATH`, then `PATH`, then platform-specific default locations.
 3. The runner builds `agy -p <prompt>` and optionally adds `--output-format json` and `--dangerously-skip-permissions`.
 4. On Windows, a non-ASCII workdir is converted to an ASCII short path when available.
 5. The runner tries normal subprocess execution first. If stdout is empty, it retries through Windows ConPTY or POSIX `pty`.
 6. ANSI escape sequences, carriage-return repaints, and TUI decoration are removed before the text is returned.
+7. `agy_jobs.py` runs explicit asynchronous tasks in a bounded thread pool.
 
 The public MCP tools return the cleaned text. The internal runner also tracks the process exit code and whether a PTY was used.
 
@@ -235,16 +239,24 @@ Install the `winpty` extra on Windows. The runner automatically retries through 
 
 Increase the tool's `timeout` for a genuinely long task, or reduce the prompt's scope. The timeout is a hard wall-clock limit for the child process.
 
+### Async job is `unknown`
+
+Job state is kept in memory by one bridge process. If the MCP process restarted,
+the old job id is no longer available; start the task again and keep the
+worktree unchanged until Codex has reviewed the result.
+
 ## 🗂️ Project structure
 
 ```text
 mcp-antigravity-bridge/
 ├── src/codex_agy_bridge/
 │   ├── agy_runner.py    # CLI discovery, subprocess, PTY fallback, output cleanup
+│   ├── agy_jobs.py      # asynchronous job registry
 │   ├── server.py        # FastMCP tool registration
 │   └── __main__.py      # python -m codex_agy_bridge entry point
 ├── tests/
-│   └── test_smoke.py
+│   ├── test_smoke.py
+│   └── test_async_jobs.py
 ├── examples/
 │   └── codex-config.toml
 ├── pyproject.toml

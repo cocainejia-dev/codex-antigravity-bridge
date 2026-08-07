@@ -2,7 +2,7 @@
 
 # Codex &lt;-&gt; Antigravity Bridge
 
-让 Codex 通过本地 MCP 调用 Google Antigravity 的 `agy` CLI，把一次性开发任务交给另一个 agent。
+让 Codex 负责规划与验收，让 Google Antigravity `agy` 负责受控实现，在同一个项目中安全协同开发。
 
 <p>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"></a>
@@ -15,25 +15,26 @@
 
 </div>
 
+## Contents
+
+- [一句话说明](#-一句话说明)
+- [快速开始](#️-快速开始)
+- [监工模式](#-codex-监工模式supervisor-mode)
+- [多页面协同](#-多页面协同开发multi-page)
+- [工具](#-四个工具)
+- [验证](#-验证)
+
 ## 🚀 一句话说明
 
 这是一个本地 MCP server：Codex 调用 `agy_ask` 或 `agy_ask_json`，bridge 在后台启动 `agy -p`，再把干净的文本结果返回给 Codex。
 
-当前支持的路径只有这一条：
+当前的调用路径是：
 
-```text
-Codex Desktop / Codex CLI
-        |
-        | MCP over stdio
-        v
-codex-agy-bridge
-        |
-        | subprocess / ConPTY / pty
-        v
-agy -p "..."
-        |
-        v
-Antigravity agent
+```mermaid
+flowchart LR
+    C[Codex Desktop / CLI] -->|MCP stdio| B[codex-agy-bridge]
+    B -->|subprocess / ConPTY| A[agy -p]
+    A --> G[Antigravity agent]
 ```
 
 > **边界提醒：** 本项目调用的是 Antigravity 的 headless CLI，不会启动、嵌入或控制 Antigravity 桌面 GUI。
@@ -43,7 +44,7 @@ Antigravity agent
 - **接入方式原生**：注册为 MCP server 后，Codex Desktop 和 Codex CLI 都可以使用。
 - **CLI-first**：复用 `agy` 自己的登录、工作区和权限流程。
 - **Windows 友好**：处理中文工作目录，并在直接输出为空时尝试 ConPTY。
-- **足够小**：本地 stdio、两个工具、没有 Web server，也没有数据库。
+- **足够小**：本地 stdio、四个工具、没有 Web server，也没有数据库。
 
 ## 🛠️ 快速开始
 
@@ -102,7 +103,7 @@ codex mcp list
 | `agy_start` | `agy_start(prompt, workdir="", timeout=300.0, dangerously_skip_permissions=false)` | 在独立 worktree 中异步启动 `agy`，让 Codex 继续开发。 |
 | `agy_status` | `agy_status(job_id)` | 查询异步 `agy` 任务状态和结果。 |
 
-两个工具最终都会调用 `agy -p "你的 prompt"`。示例请求：
+同步工具最终会调用 `agy -p "你的 prompt"`；异步工具会返回 job id，让 Codex 继续在另一个 worktree 工作。示例请求：
 
 ```text
 Use agy_ask once. Ask Antigravity to inspect README.md and return three concrete documentation improvements. Use the repository root as workdir and keep the task read-only.
@@ -224,12 +225,18 @@ codex mcp list
 ├── mcp-antigravity-bridge/
 │   ├── src/codex_agy_bridge/
 │   │   ├── agy_runner.py
+│   │   ├── agy_jobs.py
 │   │   ├── server.py
 │   │   └── __main__.py
-│   ├── tests/test_smoke.py
+│   ├── tests/
+│   │   ├── test_smoke.py
+│   │   └── test_async_jobs.py
 │   ├── examples/codex-config.toml
 │   └── pyproject.toml
 ├── research/
+├── skills/agy-supervisor/
+├── scripts/
+├── tests/test_distribution.py
 ├── docs/superpowers/
 ├── PROGRESS.md
 ├── LICENSE
