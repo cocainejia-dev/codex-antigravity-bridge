@@ -16,8 +16,6 @@ dependencies = [
 [project.optional-dependencies]
 # Windows ConPTY fallback for the agy empty-output bug (#76)
 winpty = ["pywinpty>=2.0"]
-# Deep agent-loop control via the official Antigravity SDK (multi-turn, streaming)
-sdk = ["google-antigravity>=0.1"]
 # Local smoke tests
 dev = ["pytest>=8.0"]
 
