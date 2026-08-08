@@ -159,6 +159,44 @@ codex mcp list
 
 The bridge starts automatically over local MCP stdio. No separate HTTP server is required.
 
+### CC Switch: configuration ownership and recovery
+
+CC Switch is optional; it is not required to run this bridge. If CC Switch is
+used to route Codex through another provider or to take over the local proxy,
+its restart, startup recovery, proxy re-takeover, or abnormal-exit recovery may
+rewrite `%USERPROFILE%\.codex\config.toml`. The rewrite can remove
+`[mcp_servers.*]`, `[desktop]`, `[memories]`, project settings, and other Codex
+UI configuration. An MCP server marked enabled in CC Switch's MCP database does
+not guarantee that it exists in Codex's live configuration.
+
+After every CC Switch restart or provider change, verify the live configuration:
+
+```powershell
+codex mcp list
+Get-Content "$env:USERPROFILE\.codex\config.toml"
+```
+
+If `codex-agy-bridge` is missing from either the command output or the
+`[mcp_servers.codex-agy-bridge]` section, let CC Switch finish proxy takeover
+and register it again. Use a real local Python executable on Windows rather
+than a Microsoft Store `python` shim:
+
+```powershell
+$python = "C:\path\to\python.exe"
+codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
+
+# Only when CodeGraph is installed separately:
+codex mcp add codegraph -- codegraph serve --mcp
+
+codex mcp list
+```
+
+Register MCP servers after CC Switch takeover and before creating a new Codex
+conversation. Existing conversations may keep an already-loaded MCP while new
+conversations fail. Provider hot-switching does not necessarily remove MCP
+entries, but the restart/re-takeover path may overwrite them, so check again
+after every restart. Track the upstream bug in [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265).
+
 <details>
 <summary>Manual MCP configuration</summary>
 

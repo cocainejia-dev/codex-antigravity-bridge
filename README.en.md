@@ -34,6 +34,58 @@
 > **CLI-only.** This project invokes Antigravity's headless `agy` CLI. It does
 > not launch, embed, or control the Antigravity desktop GUI.
 
+> [!WARNING]
+> **Important for users who route Codex through CC Switch.** CC Switch is not
+> required by this project. It is an optional provider switcher and local proxy
+> takeover tool. During restart, startup recovery, proxy-takeover recovery, or
+> re-takeover after an abnormal exit, CC Switch may regenerate and overwrite
+> `%USERPROFILE%\.codex\config.toml`. This can remove `[mcp_servers.*]`,
+> `[desktop]`, `[memories]`, project settings, and other Codex UI settings.
+> An MCP server shown as enabled in CC Switch's database is not proof that it
+> is present in the live Codex configuration.
+
+### Check and Recover MCP After CC Switch
+
+After restarting CC Switch or switching providers, check the configuration that
+Codex actually reads in PowerShell:
+
+```powershell
+codex mcp list
+Get-Content "$env:USERPROFILE\.codex\config.toml"
+```
+
+- If `codex-agy-bridge` is missing from `codex mcp list`, Codex did not load this MCP.
+- If `[mcp_servers.codex-agy-bridge]` is absent from `config.toml`, CC Switch likely overwrote the live configuration.
+- If CC Switch shows the server as enabled but `codex mcp list` does not, its database state was not projected into Codex's live config.
+- If an existing conversation still works but a new one does not, the MCP was likely loaded only when the old conversation was created.
+
+For temporary recovery, let CC Switch finish taking over the proxy first, then
+register the MCP with Codex CLI. On Windows, replace the example with the real
+path to `python.exe` on the local machine:
+
+```powershell
+$python = "C:\path\to\python.exe"
+codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
+
+# Restore CodeGraph too, only if it is installed separately:
+codex mcp add codegraph -- codegraph serve --mcp
+
+codex mcp list
+```
+
+Recommended order: start or restart CC Switch and wait for proxy takeover;
+register the MCP; verify `codex mcp list`; then create a new Codex conversation.
+Provider hot-switching and a CC Switch restart use different paths. A hot switch
+may leave MCP entries intact, while the current restart/re-takeover path may
+overwrite them, so verify after every CC Switch restart.
+
+This is a CC Switch configuration-ownership problem, not an MCP protocol issue
+in this bridge. See [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265)
+for the Windows reproduction, logs, and proposed fixes. Related discussions:
+[#6017](https://github.com/farion1231/cc-switch/issues/6017),
+[#4254](https://github.com/farion1231/cc-switch/issues/4254), and
+[#4699](https://github.com/farion1231/cc-switch/issues/4699).
+
 ## At A Glance
 
 Codex remains responsible for planning, task boundaries, review, testing, and

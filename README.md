@@ -28,6 +28,39 @@
 > [!IMPORTANT]
 > **仅使用命令行。** 本项目只调用 Antigravity 的无界面 `agy` 命令行，不启动、嵌入或控制 Antigravity 桌面应用。
 
+> [!WARNING]
+> **使用 CC Switch 中转 Codex 的用户必读。** CC Switch 不是本项目的必需依赖，它只是部分用户用来切换供应商或接管 Codex 本地代理的工具。CC Switch 在重启、开机恢复、代理接管恢复或异常退出后的重新接管过程中，可能重新生成并覆盖 `%USERPROFILE%\.codex\config.toml`。这可能删除 `[mcp_servers.*]`、`[desktop]`、`[memories]`、项目配置和其他 Codex UI 设置。即使 CC Switch 的 MCP 管理页面仍显示服务器已启用，也不代表服务器已经写入 Codex 实际读取的配置。
+
+### CC Switch 中转后的检查与恢复
+
+每次重启 CC Switch 或更换供应商后，都建议在 PowerShell 中检查实际配置：
+
+```powershell
+codex mcp list
+Get-Content "$env:USERPROFILE\.codex\config.toml"
+```
+
+- `codex mcp list` 没有 `codex-agy-bridge`：当前 Codex 没有加载本项目的 MCP。
+- 配置文件没有 `[mcp_servers.codex-agy-bridge]`：通常是 CC Switch 覆盖了 live 配置。
+- CC Switch 数据库里显示已启用，但 `codex mcp list` 没有：数据库状态没有同步到 Codex 的实际配置。
+- 旧对话仍能调用、新对话不能调用：MCP 可能只在旧对话创建时加载过，先修复配置再新建对话。
+
+临时恢复本项目 MCP 时，先让 CC Switch 完成代理接管，再使用 Codex CLI 注册。Windows 请把 Python 路径替换为本机真实的 `python.exe` 路径；不要把下面的示例路径当作固定路径：
+
+```powershell
+$python = "C:\path\to\python.exe"
+codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
+
+# 如果本机另外安装了 CodeGraph，再恢复它：
+codex mcp add codegraph -- codegraph serve --mcp
+
+codex mcp list
+```
+
+推荐顺序是：重启或启动 CC Switch，等待代理接管完成；注册 MCP；确认 `codex mcp list`；最后再新建 Codex 对话。供应商热切换和重启 CC Switch 不是同一条代码路径，热切换不一定删除 MCP，但当前版本的重启/恢复接管路径可能再次覆盖配置，因此每次重启后都要复查。
+
+这是 CC Switch 的配置接管问题，不是本桥接器的 MCP 协议问题。详细复现、日志和修复建议见 [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265)；相关讨论还包括 [#6017](https://github.com/farion1231/cc-switch/issues/6017)、[#4254](https://github.com/farion1231/cc-switch/issues/4254) 和 [#4699](https://github.com/farion1231/cc-switch/issues/4699)。
+
 ## 🧭 一眼看懂
 
 | Codex | 本地桥接器 | Antigravity |

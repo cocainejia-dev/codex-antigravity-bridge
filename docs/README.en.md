@@ -4,6 +4,15 @@ This is the unified documentation entry point. Project overviews, progress
 records, runtime instructions, and internal design history have separate homes
 so that user guidance is not mixed with implementation records.
 
+> [!WARNING]
+> If CC Switch takes over the Codex proxy, a restart or takeover recovery may
+> overwrite `%USERPROFILE%\.codex\config.toml`, removing MCP entries and other
+> Codex settings. An MCP marked enabled in CC Switch's management database does
+> not prove that it exists in Codex's live configuration. Run `codex mcp list`
+> and `Get-Content "$env:USERPROFILE\.codex\config.toml"`, then follow the
+> [runtime recovery instructions](../mcp-antigravity-bridge/README.md#cc-switch-configuration-ownership-and-recovery).
+> Track the upstream bug in [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265).
+
 ## Start Here
 
 | Need | Start here |

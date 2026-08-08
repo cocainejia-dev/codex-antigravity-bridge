@@ -2,6 +2,9 @@
 
 这里是项目文档的统一入口。项目首页、进度记录、运行时技术手册和设计历史分别放在不同位置，避免把使用说明和内部设计记录混在一起。
 
+> [!WARNING]
+> 如果通过 CC Switch 接管 Codex 代理，CC Switch 重启或恢复接管时可能覆盖 `%USERPROFILE%\.codex\config.toml`，导致 MCP 和其他 Codex 设置消失。CC Switch MCP 管理页面显示“已启用”不等于 Codex live 配置中存在该服务器。请先运行 `codex mcp list` 和 `Get-Content "$env:USERPROFILE\.codex\config.toml"`，再按[运行时手册中的恢复说明](../mcp-antigravity-bridge/README.md#cc-switch-configuration-ownership-and-recovery)处理。详细跟踪见 [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265)。
+
 ## 从这里开始
 
 | 你想了解什么 | 从这里开始 |
