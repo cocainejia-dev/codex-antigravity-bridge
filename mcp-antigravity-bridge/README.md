@@ -185,9 +185,6 @@ than a Microsoft Store `python` shim:
 $python = "C:\path\to\python.exe"
 codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
 
-# Only when CodeGraph is installed separately:
-codex mcp add codegraph -- codegraph serve --mcp
-
 codex mcp list
 ```
 

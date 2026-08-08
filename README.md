@@ -51,9 +51,6 @@ Get-Content "$env:USERPROFILE\.codex\config.toml"
 $python = "C:\path\to\python.exe"
 codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
 
-# 如果本机另外安装了 CodeGraph，再恢复它：
-codex mcp add codegraph -- codegraph serve --mcp
-
 codex mcp list
 ```
 

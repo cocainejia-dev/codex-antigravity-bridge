@@ -67,9 +67,6 @@ path to `python.exe` on the local machine:
 $python = "C:\path\to\python.exe"
 codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
 
-# Restore CodeGraph too, only if it is installed separately:
-codex mcp add codegraph -- codegraph serve --mcp
-
 codex mcp list
 ```
 
