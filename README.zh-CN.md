@@ -18,9 +18,9 @@
   <a href="#mode-overview">模式总览</a> ·
   <a href="#tools">工具</a> ·
   <a href="#supervisor-mode">监督模式</a> ·
-  <a href="README.en.md">英文项目首页</a> ·
+  <a href="README.md">英文项目首页</a> ·
   <a href="docs/README.md">文档索引</a> ·
-  <a href="mcp-antigravity-bridge/README.md">运行时技术手册</a>
+  <a href="docs/demo.md">验证 Demo</a>
 </p>
 
 </div>
@@ -30,6 +30,8 @@
 
 > [!WARNING]
 > **使用 CC Switch 中转 Codex 的用户必读。** CC Switch 不是本项目的必需依赖，它只是部分用户用来切换供应商或接管 Codex 本地代理的工具。CC Switch 在重启、开机恢复、代理接管恢复或异常退出后的重新接管过程中，可能重新生成并覆盖 `%USERPROFILE%\.codex\config.toml`。这可能删除 `[mcp_servers.*]`、`[desktop]`、`[memories]`、项目配置和其他 Codex UI 设置。即使 CC Switch 的 MCP 管理页面仍显示服务器已启用，也不代表服务器已经写入 Codex 实际读取的配置。
+
+<a id="cc-switch"></a>
 
 ### CC Switch 中转后的检查与恢复
 
@@ -450,7 +452,7 @@ git diff --check
 
 ```text
 .
-├── mcp-antigravity-bridge/       # 本地 MCP runtime 与技术手册
+├── mcp-antigravity-bridge/       # 本地 MCP runtime 与包级说明
 ├── skills/agy-supervisor/        # Codex supervisor skill
 ├── scripts/                      # 安装与验证脚本
 ├── tests/                        # skill 与分发回归测试
@@ -470,7 +472,7 @@ git diff --check
 | --- | --- |
 | 中文项目介绍、模式和快速开始 | [中文项目首页](README.zh-CN.md) |
 | English project overview | [README.md](README.md) |
-| 安装、工具、运行机制和排错 | [运行时技术手册](mcp-antigravity-bridge/README.md) |
+| 安装、工具、代理和排错 | [快速开始](README.zh-CN.md#quick-start) |
 | Demo、文档目录和文件分层 | [Demo](docs/demo.md) · [文档索引](docs/README.md) · [English index](docs/README.en.md) |
 | 委派规则和验收协议 | [Supervisor skill](skills/agy-supervisor/SKILL.md) |
 | 分发与 skill 验证 | [validate_skill.py](scripts/validate_skill.py) |

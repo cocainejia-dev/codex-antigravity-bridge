@@ -41,8 +41,8 @@ Prerequisites:
 ```powershell
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WhatIf
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
-codex-agy-bridge-setup --what-if
 ```
 
 On macOS or Linux:
@@ -50,8 +50,8 @@ On macOS or Linux:
 ```bash
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
+WHAT_IF=1 sh scripts/install.sh
 sh scripts/install.sh
-codex-agy-bridge-setup --what-if
 ```
 
 The setup command installs the packaged `agy-supervisor` skill, registers the
@@ -182,7 +182,6 @@ Tests mock the `agy` process boundary and do not require a live login.
 
 - [中文项目首页](README.zh-CN.md)
 - [Demo and verification checklist](docs/demo.md)
-- [Runtime manual](mcp-antigravity-bridge/README.md)
 - [Documentation index](docs/README.en.md)
 - [Supervisor skill](skills/agy-supervisor/SKILL.md)
 - [Contributing](CONTRIBUTING.md)

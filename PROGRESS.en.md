@@ -6,14 +6,14 @@
 
 <p>
   <img src="https://img.shields.io/badge/runtime-ready-16a34a?style=for-the-badge" alt="Runtime ready">
-  <img src="https://img.shields.io/badge/tests-57%20passed-2563EB?style=for-the-badge" alt="57 tests passed">
+  <img src="https://img.shields.io/badge/tests-114%20passed-2563EB?style=for-the-badge" alt="114 tests passed">
   <img src="https://img.shields.io/badge/CI-GitHub%20Actions-0ea5e9?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-111827?style=for-the-badge" alt="Apache 2.0 license">
 </p>
 
 <p>
   <a href="PROGRESS.md">中文进度</a> ·
-  <a href="README.en.md">English project overview</a> ·
+  <a href="README.md">English project overview</a> ·
   <a href="docs/README.en.md">Documentation index</a>
 </p>
 
@@ -114,9 +114,9 @@ git diff --check
 
 Latest verification:
 
-- Repository tests: 57 passed in total.
-- Root tests: 20 passed.
-- Bridge tests: 37 passed, including the real MCP stdio tool-list smoke test.
+- Repository tests: 114 passed in total.
+- Root tests: 67 passed.
+- Bridge tests: 47 passed, including the real MCP stdio tool-list smoke test.
 - Skill validation passed.
 - Compileall passed.
 - README, progress, and documentation-index links are covered by tests.
@@ -152,13 +152,13 @@ Latest verification:
 
 | File | Purpose |
 | --- | --- |
-| `README.md` | Chinese project overview |
-| `README.en.md` | English project overview |
+| `README.zh-CN.md` | Chinese project overview |
+| `README.md` | English project overview |
 | `PROGRESS.md` | Chinese project progress |
 | `PROGRESS.en.md` | English project progress |
 | `docs/README.md` | Chinese documentation index |
 | `docs/README.en.md` | English documentation index |
-| `mcp-antigravity-bridge/README.md` | Runtime installation and technical manual |
+| `mcp-antigravity-bridge/README.md` | Package installation note |
 | `skills/agy-supervisor/SKILL.md` | AGY behavior rules |
 | `skills/agy-supervisor/references/` | Protocol and plan references |
 | `tests/` | Distribution, skill, and documentation tests |

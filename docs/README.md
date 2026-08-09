@@ -1,9 +1,9 @@
 # 文档索引
 
-这里是项目文档的统一入口。项目首页、进度记录、运行时技术手册和设计历史分别放在不同位置，避免把使用说明和内部设计记录混在一起。
+这里是项目文档的统一入口。用户说明、进度记录、验证 Demo 和设计历史分别放在不同位置，避免把使用指南和内部记录混在一起。
 
 > [!WARNING]
-> 如果通过 CC Switch 接管 Codex 代理，CC Switch 重启或恢复接管时可能覆盖 `%USERPROFILE%\.codex\config.toml`，导致 MCP 和其他 Codex 设置消失。CC Switch MCP 管理页面显示“已启用”不等于 Codex live 配置中存在该服务器。请先运行 `codex mcp list` 和 `Get-Content "$env:USERPROFILE\.codex\config.toml"`，再按[运行时手册中的恢复说明](../mcp-antigravity-bridge/README.md#cc-switch-configuration-ownership-and-recovery)处理。详细跟踪见 [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265)。
+> 如果通过 CC Switch 接管 Codex 代理，重启或恢复接管时可能覆盖 `%USERPROFILE%\.codex\config.toml`。先运行 `codex mcp list` 检查 MCP 是否仍然存在；需要恢复时，按[中文首页的配置说明](../README.zh-CN.md#cc-switch)重新注册，并在新建对话前再次确认。
 
 ## 从这里开始
 
@@ -13,8 +13,7 @@
 | English project overview | [README.md](../README.md) |
 | 中文项目进度 | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
-| 安装、代理、MCP 工具和排错 | [运行时技术手册](../mcp-antigravity-bridge/README.md#quick-start) |
-| 安装配置预览 | [中文首页的快速开始](../README.zh-CN.md#quick-start) |
+| 安装、代理、MCP 工具和排错 | [中文首页快速开始](../README.zh-CN.md#quick-start) · [English quick start](../README.md#quick-start) |
 | AGY 协同规则和安全边界 | [agy-supervisor 技能](../skills/agy-supervisor/SKILL.md) |
 | 协同 Demo、dry-run 和验收步骤 | [Demo](demo.md) |
 | 安全问题报告 | [SECURITY.md](../SECURITY.md) |
@@ -22,12 +21,11 @@
 
 ## 技术文档分层
 
-### 运行时文档
+### 用户说明
 
-`mcp-antigravity-bridge/README.md` 是 Python MCP 包的技术手册，和
-`pyproject.toml`、`src/`、`tests/` 放在同一目录，方便安装包的开发者直接查看。
-它不是项目首页；项目首页统一从根目录的 `README.md` 和 `README.zh-CN.md` 开始。
-运行时手册目前以英文维护，根目录提供完整的中英文项目入口和双语进度记录。安装器支持 `--what-if` 无副作用预览、显式 `--proxy-url` 和 `--no-proxy`；协同入口支持先用 `dry_run=true` 校验计划，再创建 worktree 和启动任务。
+根目录的 `README.md` 和 `README.zh-CN.md` 是安装、代理、MCP 工具和安全边界的唯一用户入口。`docs/demo.md` 提供真实 MCP 冒烟测试、协同 dry-run 和人工验收步骤。
+
+`mcp-antigravity-bridge/README.md` 仅保留包级安装和开发命令，服务于源码开发与包元数据，不再重复用户指南。
 
 ### 设计与执行记录
 
@@ -48,6 +46,6 @@
 - `README.zh-CN.md`：中文项目入口。
 - `PROGRESS.md`：中文项目进度。
 - `PROGRESS.en.md`：英文项目进度。
-- `mcp-antigravity-bridge/README.md`：包级运行时技术手册。
+- `mcp-antigravity-bridge/README.md`：包级安装与开发说明。
 - `mcp-antigravity-bridge/examples/codex-config.toml`：手动 MCP 配置示例，路径需按本机 Python 环境替换。
 - `docs/`：文档索引、设计历史和长期参考资料。

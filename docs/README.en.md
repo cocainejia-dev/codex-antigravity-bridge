@@ -1,17 +1,14 @@
 # Documentation Index
 
 This is the unified documentation entry point. Project overviews, progress
-records, runtime instructions, and internal design history have separate homes
+records, the verification demo, and internal design history have separate homes
 so that user guidance is not mixed with implementation records.
 
 > [!WARNING]
 > If CC Switch takes over the Codex proxy, a restart or takeover recovery may
-> overwrite `%USERPROFILE%\.codex\config.toml`, removing MCP entries and other
-> Codex settings. An MCP marked enabled in CC Switch's management database does
-> not prove that it exists in Codex's live configuration. Run `codex mcp list`
-> and `Get-Content "$env:USERPROFILE\.codex\config.toml"`, then follow the
-> [runtime recovery instructions](../mcp-antigravity-bridge/README.md#cc-switch-configuration-ownership-and-recovery).
-> Track the upstream bug in [CC Switch issue #6265](https://github.com/farion1231/cc-switch/issues/6265).
+> overwrite `%USERPROFILE%\.codex\config.toml`. Run `codex mcp list` to verify
+> that the bridge is still registered; use the [Chinese setup instructions](../README.zh-CN.md#cc-switch)
+> when it needs to be restored before creating a new conversation.
 
 ## Start Here
 
@@ -21,8 +18,7 @@ so that user guidance is not mixed with implementation records.
 | English overview, installation, and mode selection | [Project overview](../README.md) |
 | Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
-| Installation, proxy, MCP tools, and troubleshooting | [Runtime technical manual](../mcp-antigravity-bridge/README.md#quick-start) |
-| Setup preview and registration | [Project quick start](../README.md#quick-start) |
+| Installation, proxy, MCP tools, and troubleshooting | [English quick start](../README.md#quick-start) · [中文快速开始](../README.zh-CN.md#quick-start) |
 | AGY collaboration rules and safety boundaries | [agy-supervisor skill](../skills/agy-supervisor/SKILL.md) |
 | Collaboration demo, dry-run, and verification | [Demo](demo.md) |
 | Security reporting | [SECURITY.md](../SECURITY.md) |
@@ -30,17 +26,14 @@ so that user guidance is not mixed with implementation records.
 
 ## Technical Documentation Layout
 
-### Runtime documentation
+### User documentation
 
-`mcp-antigravity-bridge/README.md` is the technical manual for the Python MCP
-package. It stays beside `pyproject.toml`, `src/`, and `tests/` so package
-developers can find installation and runtime details in one place. It is not the
-project landing page; start with the root `README.md` or `README.zh-CN.md` instead.
-The package manual is maintained in English; the root project overviews and
-progress records are available in both Chinese and English. The installer
-supports a side-effect-free `--what-if` preview, explicit `--proxy-url` and
-`--no-proxy` settings, and collaboration supports `dry_run=true` before any
-worktree or agy job is created.
+The root `README.md` and `README.zh-CN.md` are the single user entry points for
+installation, proxy setup, MCP tools, and security boundaries. `docs/demo.md`
+contains the real MCP smoke test, collaboration dry-run, and human review steps.
+
+`mcp-antigravity-bridge/README.md` only contains package installation and
+development commands for source contributors and package metadata.
 
 ### Design and execution history
 
@@ -62,6 +55,6 @@ users.
 - `README.zh-CN.md`: Chinese project entry point.
 - `PROGRESS.md`: Chinese project progress.
 - `PROGRESS.en.md`: English project progress.
-- `mcp-antigravity-bridge/README.md`: package-level runtime technical manual.
+- `mcp-antigravity-bridge/README.md`: package-level installation and development note.
 - `mcp-antigravity-bridge/examples/codex-config.toml`: manual MCP configuration example; replace its Python path for the local machine.
 - `docs/`: documentation indexes, design history, and long-lived reference material.

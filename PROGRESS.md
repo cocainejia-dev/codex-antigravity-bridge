@@ -6,14 +6,14 @@
 
 <p>
   <img src="https://img.shields.io/badge/runtime-ready-16a34a?style=for-the-badge" alt="Runtime ready">
-  <img src="https://img.shields.io/badge/tests-57%20passed-2563EB?style=for-the-badge" alt="57 tests passed">
+  <img src="https://img.shields.io/badge/tests-114%20passed-2563EB?style=for-the-badge" alt="114 tests passed">
   <img src="https://img.shields.io/badge/CI-GitHub%20Actions-0ea5e9?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-111827?style=for-the-badge" alt="Apache 2.0 license">
 </p>
 
 <p>
-  <a href="README.md">中文项目首页</a> ·
-  <a href="README.en.md">English project overview</a> ·
+  <a href="README.zh-CN.md">中文项目首页</a> ·
+  <a href="README.md">English project overview</a> ·
   <a href="PROGRESS.en.md">English progress</a> ·
   <a href="docs/README.md">文档索引</a>
 </p>
@@ -91,7 +91,7 @@ Codex 在自己的工作区继续开发，轮询协同状态
 | Windows 路径与终端 | Windows paths and PTY | ✅ 已完成 / Done | 非 ASCII 工作目录与 ConPTY 回退。 |
 | 监督技能 | Supervisor skill | ✅ 已完成 / Done | 授权、权限、状态机和纠正规则。 |
 | 安装与代理配置 | Install and proxy setup | ✅ 已完成 / Done | Python 路径修复、代理探测与 MCP 配置写入。 |
-| 文档 | Documentation | ✅ 已完成 / Done | 中文首页、英文手册、中英双语进度。 |
+| 文档 | Documentation | ✅ 已完成 / Done | 中英文首页、文档索引、验证 Demo 和双语进度。 |
 | 持续集成 | Continuous integration | ✅ 已完成 / Done | GitHub Actions 覆盖测试、技能校验和编译检查。 |
 
 ### 🧹 最近审计修复 · Recent Audit Fixes
@@ -146,7 +146,7 @@ Codex 在自己的工作区继续开发，轮询协同状态
 ### 📝 文档与验证 · Documentation and Verification
 
 - 根 README 已完成视觉重设计。
-- 英文 bridge README 与根文档保持同一套信息架构。
+- 根目录中英文首页、文档索引和验证 Demo 保持同一套信息架构。
 - 本进度文档改为中文，并记录交付边界。
 - 分发测试覆盖 skill、README、入口和 metadata。
 - skill validator 会扫描完整 skill package 与 references。
@@ -203,12 +203,12 @@ python scripts/validate_skill.py
 git diff --check
 ```
 
-Latest verification: repository tests 57 passed in total; root tests 20 passed; bridge tests 37 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
+Latest verification: repository tests 114 passed in total; root tests 67 passed; bridge tests 47 passed, including the real MCP stdio tool-list smoke test; skill validation passed; compileall passed.
 
 当前结果：
 
-- 仓库总测试：57 passed；根测试：20 passed。
-- bridge 测试：37 passed，包含真实 MCP stdio 工具清单测试。
+- 仓库总测试：114 passed；根测试：67 passed。
+- bridge 测试：47 passed，包含真实 MCP stdio 工具清单测试。
 - skill validator：skill validation passed。
 - README Markdown 代码围栏：已检查为真实反引号，围栏成对闭合。
 - CI 配置：已覆盖 Windows 与 Ubuntu、多版本 Python、根测试和 bridge 测试。
@@ -256,13 +256,13 @@ bridge 测试与编译检查均通过。单元测试 mock 进程边界，不需�
 | 文件 | 作用 |
 | --- | --- |
 | `mcp-antigravity-bridge/src/codex_agy_bridge/` | MCP bridge runtime |
-| `README.md` | 中文项目入口 |
-| `README.en.md` | English project entry point |
+| `README.zh-CN.md` | 中文项目入口 |
+| `README.md` | English project entry point |
 | `PROGRESS.md` | 当前中文进度 |
 | `PROGRESS.en.md` | English project progress |
 | `docs/README.md` | 中文文档索引 |
 | `docs/README.en.md` | English documentation index |
-| `mcp-antigravity-bridge/README.md` | 运行时技术手册 / Runtime technical manual |
+| `mcp-antigravity-bridge/README.md` | 包级安装说明 / Package metadata note |
 | `skills/agy-supervisor/SKILL.md` | Supervisor 行为规则 |
 | `skills/agy-supervisor/references/` | 状态机、计划和协议参考 |
 | `scripts/install.ps1` | Windows 安装器 |
