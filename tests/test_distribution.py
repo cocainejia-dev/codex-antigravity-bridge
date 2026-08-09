@@ -17,7 +17,15 @@ def test_distribution_files_exist() -> None:
         ROOT / "scripts" / "install.ps1",
         ROOT / "scripts" / "install.sh",
         ROOT / "scripts" / "validate_skill.py",
+        ROOT / "mcp-antigravity-bridge" / "src" / "codex_agy_bridge" / "setup.py",
+        ROOT / "mcp-antigravity-bridge" / "src" / "codex_agy_bridge" / "resources" / "agy-supervisor" / "SKILL.md",
+        ROOT / "README.md",
         ROOT / "README.en.md",
+        ROOT / "README.zh-CN.md",
+        ROOT / "docs" / "demo.md",
+        ROOT / "SECURITY.md",
+        ROOT / "CONTRIBUTING.md",
+        ROOT / "CHANGELOG.md",
         ROOT / "PROGRESS.en.md",
         ROOT / "docs" / "README.md",
         ROOT / "docs" / "README.en.md",
@@ -61,18 +69,18 @@ def test_readme_documents_install_and_supervision() -> None:
         "agy_ask",
         "agy_start",
         "agy_status",
-        "监督模式",
-        "多页面协同",
-        "docs/agy-plans",
-        "README.en.md",
-        "PROGRESS.en.md",
-        "docs/README.md",
+        "agy_collab_start",
+        "agy_collab_status",
+        "codex-agy-bridge-setup",
+        "README.zh-CN.md",
+        "docs/demo.md",
+        "SECURITY.md",
     ):
         assert phrase in readme
 
 
 def test_readmes_document_all_runtime_modes() -> None:
-    chinese = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
     english = (ROOT / "README.en.md").read_text(encoding="utf-8")
 
     for phrase in (
@@ -101,26 +109,11 @@ def test_readmes_document_all_runtime_modes() -> None:
 
 
 def test_homepage_navigation_links_have_explicit_targets() -> None:
-    navigation = {
-        ROOT / "README.md": (
-            "quick-start",
-            "mode-overview",
-            "tools",
-            "supervisor-mode",
-        ),
-        ROOT / "README.en.md": (
-            "quick-start",
-            "runtime-modes",
-            "collaboration-rules",
-            "documentation-map",
-        ),
-    }
-
-    for path, anchors in navigation.items():
-        readme = path.read_text(encoding="utf-8")
-        for anchor in anchors:
-            assert f'href="#{anchor}"' in readme
-            assert f'<a id="{anchor}"></a>' in readme
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "[Quick Start](#quick-start)" in readme
+    assert "[Demo](docs/demo.md)" in readme
+    assert "[Security](SECURITY.md)" in readme
+    assert "[中文说明](README.zh-CN.md)" in readme
 
 
 def test_progress_documents_runtime_modes_and_lifecycle() -> None:
@@ -140,10 +133,11 @@ def test_progress_documents_runtime_modes_and_lifecycle() -> None:
 
 
 def test_installers_support_per_user_proxy_configuration() -> None:
+    setup = (ROOT / "mcp-antigravity-bridge" / "src" / "codex_agy_bridge" / "setup.py").read_text(encoding="utf-8")
     windows_installer = (ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
     posix_installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
 
-    for phrase in ("ProxyUrl", "HTTP_PROXY", "HTTPS_PROXY", "mcp_servers.codex-agy-bridge.env"):
-        assert phrase in windows_installer
     for phrase in ("PROXY_URL", "HTTP_PROXY", "HTTPS_PROXY", "mcp_servers.codex-agy-bridge.env"):
-        assert phrase in posix_installer
+        assert phrase in setup
+    assert "codex_agy_bridge.setup" in windows_installer
+    assert "codex_agy_bridge.setup" in posix_installer

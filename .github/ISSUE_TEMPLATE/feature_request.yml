@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose a focused improvement to the local bridge.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete workflow problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change and its safety impact.
+    validations:
+      required: true

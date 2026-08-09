@@ -18,14 +18,14 @@
   <a href="#mode-overview">Modes</a> ·
   <a href="#tool-api">Tool API</a> ·
   <a href="#parallel-worktree-workflow">Worktrees</a> ·
-  <a href="../README.md">Chinese project overview</a> ·
-  <a href="../README.en.md">English project overview</a> ·
+  <a href="../README.zh-CN.md">Chinese project overview</a> ·
+  <a href="../README.md">English project overview</a> ·
   <a href="../PROGRESS.md">Chinese progress</a> ·
   <a href="../PROGRESS.en.md">English progress</a> ·
   <a href="../docs/README.en.md">Docs index</a>
 </p>
 
-<p><a href="../README.md">中文项目首页</a> · <a href="../README.en.md">English project overview</a></p>
+<p><a href="../README.zh-CN.md">中文项目首页</a> · <a href="../README.md">English project overview</a></p>
 
 </div>
 
@@ -140,20 +140,36 @@ python -m pip install -e ".[dev]"
 
 The `dev` extra installs pytest. The `winpty` extra enables the Windows ConPTY fallback. The package does not install or manage Antigravity OAuth credentials.
 
-### 🌐 Per-user Proxy Configuration
-
-Proxy ports are application-specific. Run the repository-level installer from the repository root. It detects environment and system proxy settings plus common local proxy listeners, then writes the result to the current user's Codex MCP configuration. For a proxy that cannot be detected automatically, pass its address explicitly:
+Register the installed package with Codex through the single setup command:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -ProxyUrl "http://127.0.0.1:7897"
+codex-agy-bridge-setup --what-if
+codex-agy-bridge-setup
 ```
 
-On macOS or Linux, set `PROXY_URL` before running `scripts/install.sh`. The proxy is passed to the MCP child process through `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY`; no TUN mode is required when the local proxy accepts HTTP CONNECT or SOCKS5.
+The command installs the packaged skill, uses the current Python interpreter,
+and updates only this server's managed proxy variables. It is idempotent and
+does not read, save, or print OAuth credentials.
+
+### 🌐 Per-user Proxy Configuration
+
+Proxy ports are application-specific. Set an environment proxy or pass an
+explicit address to the setup command:
+
+```powershell
+codex-agy-bridge-setup --proxy-url "http://127.0.0.1:7897"
+codex-agy-bridge-setup --no-proxy
+```
+
+On macOS or Linux, set `PROXY_URL` before running the setup command. The
+proxy is passed to the MCP child process through `HTTP_PROXY`, `HTTPS_PROXY`,
+and `ALL_PROXY`; no TUN mode is required when the local proxy accepts HTTP
+CONNECT or SOCKS5. URLs containing credentials are rejected.
 
 ### 03 · Register with Codex
 
 ```powershell
-codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
+codex-agy-bridge-setup
 codex mcp list
 ```
 
@@ -272,6 +288,8 @@ existing bounded job registry so Codex can continue coding in its own worktree.
 ```text
 agy_collab_start(
   project_dir="C:/work/my-app",
+  base_ref="HEAD",
+  dry_run=true,
   shared_contract="Frontend consumes GET /api/items.",
   display_mode="headless",
   max_tasks=4,
@@ -295,11 +313,19 @@ agy_collab_start(
 )
 ```
 
+Use `dry_run=true` first. It validates the repository, base ref, task format,
+owned-path overlap, branches, worktree paths, and acceptance metadata without
+starting `agy`, creating a worktree, creating a job, or changing Git. Repeat
+with `dry_run=false` only after reviewing the returned plan.
+
 Required task fields are `id`, `prompt`, `owned_paths`, and `acceptance`.
 Owned paths must not overlap. `agy_collab_status(session_id)` returns each
-job state, branch, worktree path, changed files, uncommitted changes, and a
-`diff_check` result. `ready_for_review` means the agy processes exited
-successfully; it does not mean the acceptance criteria have passed.
+job state, branch, worktree path, committed, uncommitted, untracked, and deleted
+files, plus `scope_status`, `scope_violations`, and a `diff_check` result.
+`scope_status` is `passed`, `violated`, or `unknown`; violations are reported
+for review and never silently reverted. `ready_for_review` means the agy
+processes exited successfully; it does not mean the acceptance criteria have
+passed.
 
 The MVP never auto-merges, deletes worktrees, or runs arbitrary verification
 commands. After reviewing the returned branches and running the listed checks,

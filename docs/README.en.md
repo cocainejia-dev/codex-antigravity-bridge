@@ -17,12 +17,14 @@ so that user guidance is not mixed with implementation records.
 
 | Need | Start here |
 | --- | --- |
-| Chinese overview, installation, and mode selection | [Project overview](../README.md) |
-| English overview, installation, and mode selection | [README.en.md](../README.en.md) |
+| Chinese overview, installation, and mode selection | [README.zh-CN.md](../README.zh-CN.md) |
+| English overview, installation, and mode selection | [Project overview](../README.md) |
 | Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | Installation, proxy, MCP tools, and troubleshooting | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
 | AGY collaboration rules and safety boundaries | [agy-supervisor skill](../skills/agy-supervisor/SKILL.md) |
+| Collaboration demo and verification | [Demo](demo.md) |
+| Security reporting | [SECURITY.md](../SECURITY.md) |
 | Research notes | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
 ## Technical Documentation Layout
@@ -32,7 +34,7 @@ so that user guidance is not mixed with implementation records.
 `mcp-antigravity-bridge/README.md` is the technical manual for the Python MCP
 package. It stays beside `pyproject.toml`, `src/`, and `tests/` so package
 developers can find installation and runtime details in one place. It is not the
-project landing page; start with the root `README.md` or `README.en.md` instead.
+project landing page; start with the root `README.md` or `README.zh-CN.md` instead.
 The package manual is maintained in English; the root project overviews and
 progress records are available in both Chinese and English.
 
@@ -51,8 +53,9 @@ users.
 
 ## Naming Convention
 
-- `README.md`: Chinese project entry point.
-- `README.en.md`: English project entry point.
+- `README.md`: English project entry point.
+- `README.en.md`: English compatibility entry point.
+- `README.zh-CN.md`: Chinese project entry point.
 - `PROGRESS.md`: Chinese project progress.
 - `PROGRESS.en.md`: English project progress.
 - `mcp-antigravity-bridge/README.md`: package-level runtime technical manual.
