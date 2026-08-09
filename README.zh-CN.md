@@ -134,6 +134,14 @@ Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
 
 ## 🚀 快速开始
 
+### 00 · 准备环境
+
+- Python 3.10 或更高版本。
+- Git。
+- 支持 MCP 的 Codex Desktop 或 Codex CLI。
+- 已安装为 `agy` 命令的 Antigravity CLI。
+- 首次执行真实任务前，先完成一次交互式 `agy` 登录。
+
 ### 01 · 安装仓库
 
 **Windows PowerShell**
@@ -141,10 +149,11 @@ Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
 ```powershell
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WhatIf
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-安装器会自动读取当前环境、Windows 系统代理和常见本地代理端口，并且只写入当前用户的 `codex-agy-bridge` MCP 配置。使用不同代理软件时，可以显式指定地址：
+`--what-if` 只打印安装和配置计划，不会写文件、修改 Codex 配置、注册 MCP 或启动 `agy`。确认环境后再运行安装脚本即可完成安装、技能复制和 MCP 注册。安装器会自动读取当前环境、Windows 系统代理和常见本地代理端口，并且只写入当前用户的 `codex-agy-bridge` MCP 配置。使用不同代理软件时，可以显式指定地址：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -ProxyUrl "http://127.0.0.1:7897"
@@ -157,12 +166,34 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -ProxyUrl "http:/
 ```bash
 git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
+WHAT_IF=1 sh scripts/install.sh
 sh scripts/install.sh
 ```
 
 安装脚本会安装桥接器、复制 `agy-supervisor` 技能，并幂等注册 `codex-agy-bridge`。它不会安装或保存 Antigravity OAuth 凭据。
 
-### 02 · 安装并登录 `agy`
+### 02 · 直接安装包
+
+当 `codex-agy-bridge` 发布到包索引后，可以使用：
+
+```powershell
+pipx install codex-agy-bridge
+codex-agy-bridge-setup
+
+uv tool install codex-agy-bridge
+codex-agy-bridge-setup
+```
+
+本地开发或从源码安装时，可以使用可编辑安装：
+
+```powershell
+python -m pip install -e ".\mcp-antigravity-bridge[dev,winpty]"
+codex-agy-bridge-setup --what-if
+```
+
+`dev` 提供测试依赖，`winpty` 提供 Windows ConPTY 回退；安装包不会安装或管理 Antigravity OAuth 凭据。
+
+### 03 · 安装并登录 `agy`
 
 Windows PowerShell：
 
@@ -174,7 +205,7 @@ agy
 
 按照交互式提示完成登录。macOS / Linux 请参考 [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview)。
 
-### 03 · 验证连接
+### 04 · 验证连接
 
 ```powershell
 agy -p "Reply exactly AGY_OK"
@@ -206,6 +237,8 @@ Windows 手动配置 MCP 时，请把 `command` 写成真实 Python 可执行文
 | `agy_collab_start` | 按任务契约自动创建 worktree 并并行启动任务 | 协同会话 JSON |
 | `agy_collab_status` | 汇总任务、工作区和差异状态 | 协同会话 JSON |
 
+所有公开任务工具都会在启动进程或 job 前拒绝非正数和非有限的 `timeout`。普通工具默认超时为 `300.0` 秒，`agy_collab_start` 默认超时为 `900.0` 秒。
+
 ## 🤝 协同开发模式 MVP
 
 这个模式适合“Codex 写后端、agy 写前端”这类可以明确分区的任务。它会
@@ -224,9 +257,11 @@ Windows 会为每个运行中的任务打开一个可见终端窗口，用户可
 ```text
 agy_collab_start(
   project_dir="C:/work/my-app",
+  base_ref="HEAD",
   shared_contract="前端调用 GET /api/items，返回 id、name 字段。",
   display_mode="headless",
   max_tasks=4,
+  dry_run=true,
   tasks=[
     {
       "id": "backend",
@@ -250,6 +285,10 @@ agy_collab_start(
 使用 `agy_collab_status(session_id)` 查看每个任务的状态、分支、worktree、
 改动文件、未提交改动和 `diff_check` 结果。`ready_for_review` 只表示 agy
 进程成功退出，不代表验收标准已经通过。
+
+建议先使用 `dry_run=true` 验证仓库、基准引用、任务格式、文件边界、分支和
+验收信息；确认返回的计划后，再使用 `dry_run=false` 创建 worktree 并启动
+真实任务。dry-run 不会创建目录、分支或 agy job。
 
 这个 MVP 不会自动合并、删除 worktree，也不会自动执行任务提供的命令。Codex
 仍然需要检查差异、运行验收测试，并在确认后手动合并分支。
@@ -321,11 +360,34 @@ Codex 会先把计划写入 `docs/agy-plans/`，创建并验证独立工作区�
 
 ## ⚙️ 配置与 Windows 支持
 
-推荐使用 Codex CLI 注册：
+推荐使用安装器提供的幂等配置命令：
 
 ```powershell
-codex mcp add codex-agy-bridge -- python -m codex_agy_bridge
+codex-agy-bridge-setup --what-if
+codex-agy-bridge-setup
+codex mcp list
 ```
+
+需要显式指定代理时：
+
+```powershell
+codex-agy-bridge-setup --proxy-url "http://127.0.0.1:7897"
+codex-agy-bridge-setup --no-proxy
+```
+
+该命令只管理 `codex-agy-bridge` 的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`
+和 `NO_PROXY` 配置，不会覆盖其他 MCP 服务的环境变量。带用户名或密码的
+代理地址会被拒绝。
+
+也可以使用 Codex CLI 手动注册：
+
+```powershell
+$python = "C:\path\to\python.exe"
+codex mcp add codex-agy-bridge -- $python -m codex_agy_bridge
+```
+
+请把示例路径替换为本机真实的 Python 绝对路径。Windows 上不要把可能指向
+Microsoft Store shim 的 `python` 命令直接写入 MCP 配置。
 
 <details>
 <summary>手动 MCP 配置</summary>
@@ -378,6 +440,7 @@ python -m compileall -q src
 cd ..
 python -m pytest -q
 python scripts/validate_skill.py
+python -m build mcp-antigravity-bridge
 git diff --check
 ```
 

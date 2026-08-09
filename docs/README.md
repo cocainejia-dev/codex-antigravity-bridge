@@ -13,10 +13,10 @@
 | English project overview | [README.md](../README.md) |
 | 中文项目进度 | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
-| 安装、代理、MCP 工具和排错 | [运行时技术手册](../mcp-antigravity-bridge/README.md) |
-| Runtime manual in English | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
+| 安装、代理、MCP 工具和排错 | [运行时技术手册](../mcp-antigravity-bridge/README.md#quick-start) |
+| 安装配置预览 | [中文首页的快速开始](../README.zh-CN.md#quick-start) |
 | AGY 协同规则和安全边界 | [agy-supervisor 技能](../skills/agy-supervisor/SKILL.md) |
-| 协同 Demo 和验收步骤 | [Demo](demo.md) |
+| 协同 Demo、dry-run 和验收步骤 | [Demo](demo.md) |
 | 安全问题报告 | [SECURITY.md](../SECURITY.md) |
 | 研究资料 | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
@@ -27,7 +27,7 @@
 `mcp-antigravity-bridge/README.md` 是 Python MCP 包的技术手册，和
 `pyproject.toml`、`src/`、`tests/` 放在同一目录，方便安装包的开发者直接查看。
 它不是项目首页；项目首页统一从根目录的 `README.md` 和 `README.zh-CN.md` 开始。
-运行时手册目前以英文维护，根目录提供完整的中英文项目入口和双语进度记录。
+运行时手册目前以英文维护，根目录提供完整的中英文项目入口和双语进度记录。安装器支持 `--what-if` 无副作用预览、显式 `--proxy-url` 和 `--no-proxy`；协同入口支持先用 `dry_run=true` 校验计划，再创建 worktree 和启动任务。
 
 ### 设计与执行记录
 
@@ -49,5 +49,5 @@
 - `PROGRESS.md`：中文项目进度。
 - `PROGRESS.en.md`：英文项目进度。
 - `mcp-antigravity-bridge/README.md`：包级运行时技术手册。
-- `mcp-antigravity-bridge/examples/codex-config.toml`：手动 MCP 配置示例。
+- `mcp-antigravity-bridge/examples/codex-config.toml`：手动 MCP 配置示例，路径需按本机 Python 环境替换。
 - `docs/`：文档索引、设计历史和长期参考资料。

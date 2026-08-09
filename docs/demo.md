@@ -4,7 +4,22 @@ This demo is intentionally honest about its prerequisites. A real run needs
 Codex, the `agy` CLI, a completed `agy` login, Git, and a separate example
 repository. The dry-run does not need an `agy` binary or an active login.
 
-## 1. Validate the plan without side effects
+## 1. Verify the MCP bridge
+
+First verify the local CLI and MCP registration:
+
+```powershell
+agy --version
+agy -p "Reply exactly DIRECT_AGY_OK"
+codex mcp list
+```
+
+Then call `agy_ask` from Codex with a small reversible prompt, for example
+`Reply exactly MCP_AGY_OK`. Keep `dangerously_skip_permissions=false` unless
+the user has explicitly authorized a trusted worktree and task. The repository
+tests mock this process boundary; this step is the real-machine smoke test.
+
+## 2. Validate the plan without side effects
 
 From a Codex session with this MCP server installed, call `agy_collab_start`
 with the following request:
@@ -41,7 +56,7 @@ worktree paths, and no created directory or job. Invalid refs, overlapping
 owned paths, invalid task objects, and a non-Git project must fail before any
 side effect.
 
-## 2. Run the real collaboration
+## 3. Run the real collaboration
 
 After reviewing the dry-run response, repeat the request with `dry_run: false`.
 The bridge creates one branch and worktree per task and starts one bounded
@@ -65,7 +80,7 @@ For each task, review:
 when Git inspection is unavailable. A violation is reported for human review;
 the bridge does not delete or revert the file.
 
-## 3. Human review
+## 4. Human review
 
 Run the task-specific verification commands in each worktree. Inspect the
 diffs and decide whether to merge the task branches manually. A

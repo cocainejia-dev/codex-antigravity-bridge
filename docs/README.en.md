@@ -21,9 +21,10 @@ so that user guidance is not mixed with implementation records.
 | English overview, installation, and mode selection | [Project overview](../README.md) |
 | Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
-| Installation, proxy, MCP tools, and troubleshooting | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
+| Installation, proxy, MCP tools, and troubleshooting | [Runtime technical manual](../mcp-antigravity-bridge/README.md#quick-start) |
+| Setup preview and registration | [Project quick start](../README.md#quick-start) |
 | AGY collaboration rules and safety boundaries | [agy-supervisor skill](../skills/agy-supervisor/SKILL.md) |
-| Collaboration demo and verification | [Demo](demo.md) |
+| Collaboration demo, dry-run, and verification | [Demo](demo.md) |
 | Security reporting | [SECURITY.md](../SECURITY.md) |
 | Research notes | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
@@ -36,7 +37,10 @@ package. It stays beside `pyproject.toml`, `src/`, and `tests/` so package
 developers can find installation and runtime details in one place. It is not the
 project landing page; start with the root `README.md` or `README.zh-CN.md` instead.
 The package manual is maintained in English; the root project overviews and
-progress records are available in both Chinese and English.
+progress records are available in both Chinese and English. The installer
+supports a side-effect-free `--what-if` preview, explicit `--proxy-url` and
+`--no-proxy` settings, and collaboration supports `dry_run=true` before any
+worktree or agy job is created.
 
 ### Design and execution history
 
@@ -59,5 +63,5 @@ users.
 - `PROGRESS.md`: Chinese project progress.
 - `PROGRESS.en.md`: English project progress.
 - `mcp-antigravity-bridge/README.md`: package-level runtime technical manual.
-- `mcp-antigravity-bridge/examples/codex-config.toml`: manual MCP configuration example.
+- `mcp-antigravity-bridge/examples/codex-config.toml`: manual MCP configuration example; replace its Python path for the local machine.
 - `docs/`: documentation indexes, design history, and long-lived reference material.
