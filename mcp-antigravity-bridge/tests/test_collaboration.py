@@ -129,6 +129,92 @@ def test_status_aggregates_jobs_and_reports_worktree_checks(tmp_path: Path) -> N
     assert status["tasks"][0]["worktree"]["dirty"] is True
     assert status["tasks"][0]["worktree"]["diff_check"] == "passed"
     assert status["tasks"][0]["acceptance_status"] == "manual"
+    assert status["scope_status"] == "passed"
+    assert status["changed_files"] == ["backend/api.py"]
+
+
+def test_dry_run_validates_without_creating_worktrees_or_jobs(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    planned_root = tmp_path / "planned-worktrees"
+
+    result = registry.start(
+        project_dir=str(repo),
+        worktree_root=str(planned_root),
+        dry_run=True,
+        shared_contract="frontend consumes /api/items",
+        tasks=[
+            {
+                "id": "backend",
+                "prompt": "Implement the API.",
+                "owned_paths": ["backend"],
+                "acceptance": ["tests pass"],
+                "verification": ["python -m pytest"],
+            }
+        ],
+    )
+
+    assert result["state"] == "dry-run"
+    assert result["session_id"]
+    assert result["shared_contract"] == "frontend consumes /api/items"
+    assert result["tasks"][0]["branch"].startswith("codex-agy/")
+    assert result["tasks"][0]["owned_paths"] == ["backend"]
+    assert not planned_root.exists()
+    assert jobs.started == []
+    assert registry.status(result["session_id"])["state"] == "unknown"
+
+
+def test_status_audits_committed_uncommitted_untracked_and_deleted_files(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "backend",
+                "prompt": "Implement the API.",
+                "owned_paths": ["backend"],
+                "acceptance": ["tests pass"],
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {
+        "job_id": job_id,
+        "state": "completed",
+        "text": "Implemented and tested.",
+        "exit_code": 0,
+        "used_pty": False,
+    }
+    workdir = Path(started["tasks"][0]["workdir"])
+    backend = workdir / "backend"
+    backend.mkdir()
+    (backend / "committed.py").write_text("COMMITTED = True\n", encoding="utf-8")
+    (backend / "modified.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (backend / "deleted.py").write_text("DELETE_ME = True\n", encoding="utf-8")
+    _git(workdir, "add", "backend")
+    _git(workdir, "commit", "-m", "add backend files")
+    (backend / "modified.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (backend / "deleted.py").unlink()
+    (backend / "untracked.py").write_text("UNTRACKED = True\n", encoding="utf-8")
+    (workdir / "outside.py").write_text("OUTSIDE = True\n", encoding="utf-8")
+
+    status = registry.status(started["session_id"])
+    worktree = status["tasks"][0]["worktree"]
+
+    assert "backend/committed.py" in worktree["committed"]
+    assert "backend/modified.py" in worktree["uncommitted"]
+    assert "backend/untracked.py" in worktree["untracked"]
+    assert "backend/deleted.py" in worktree["deleted"]
+    assert worktree["scope_status"] == "violated"
+    assert worktree["scope_violations"] == ["outside.py"]
+    assert status["scope_status"] == "violated"
+    assert status["scope_violations"] == ["outside.py"]
 
 
 def test_start_rejects_overlapping_owned_paths(tmp_path: Path) -> None:
@@ -151,6 +237,78 @@ def test_start_rejects_overlapping_owned_paths(tmp_path: Path) -> None:
                     "owned_paths": ["src/ui/"],
                     "acceptance": ["pass"],
                 },
+            ],
+        )
+
+
+def test_start_rejects_absolute_and_unc_owned_paths(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    registry = CollaborationRegistry(jobs=FakeJobs())
+
+    for path in ("/backend", r"\server\share"):
+        with pytest.raises(ValueError, match="relative paths"):
+            registry.start(
+                project_dir=str(repo),
+                tasks=[
+                    {
+                        "id": "backend",
+                        "prompt": "Implement the API.",
+                        "owned_paths": [path],
+                        "acceptance": ["pass"],
+                    }
+                ],
+            )
+
+
+def test_status_reports_both_ends_of_uncommitted_rename(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "backend").mkdir()
+    (repo / "backend" / "old.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "add", "backend")
+    _git(repo, "commit", "-m", "add backend file")
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "backend",
+                "prompt": "Rename the backend file.",
+                "owned_paths": ["backend"],
+                "acceptance": ["rename is reviewed"],
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {"job_id": job_id, "state": "completed", "exit_code": 0}
+    workdir = Path(started["tasks"][0]["workdir"])
+    _git(workdir, "mv", "backend/old.py", "outside.py")
+
+    status = registry.status(started["session_id"])
+    worktree = status["tasks"][0]["worktree"]
+
+    assert "backend/old.py" in worktree["changed_files"]
+    assert "outside.py" in worktree["changed_files"]
+    assert status["scope_status"] == "violated"
+    assert "outside.py" in status["scope_violations"]
+
+
+def test_start_rejects_nonfinite_timeout(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    registry = CollaborationRegistry(jobs=FakeJobs())
+
+    with pytest.raises(ValueError, match="timeout"):
+        registry.start(
+            project_dir=str(repo),
+            timeout=float("nan"),
+            tasks=[
+                {
+                    "id": "backend",
+                    "prompt": "Implement the API.",
+                    "owned_paths": ["backend"],
+                    "acceptance": ["pass"],
+                }
             ],
         )
 

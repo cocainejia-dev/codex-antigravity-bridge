@@ -281,7 +281,7 @@ def resolve_agy_environment(force: bool = False) -> dict[str, str]:
     if proxy and _is_local_proxy(proxy):
         parsed = urlsplit(proxy)
         detected = _probe_local_proxy_port(parsed.port or 0)
-        proxy = detected or _cached_runtime_proxy(force=force)
+        proxy = detected or proxy
     elif not proxy:
         proxy = _cached_runtime_proxy(force=force)
 

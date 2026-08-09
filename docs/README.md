@@ -9,13 +9,15 @@
 
 | 你想了解什么 | 从这里开始 |
 | --- | --- |
-| 中文项目介绍、安装和模式选择 | [项目首页](../README.md) |
-| English project overview | [README.en.md](../README.en.md) |
+| 中文项目介绍、安装和模式选择 | [项目首页](../README.zh-CN.md) |
+| English project overview | [README.md](../README.md) |
 | 中文项目进度 | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | 安装、代理、MCP 工具和排错 | [运行时技术手册](../mcp-antigravity-bridge/README.md) |
 | Runtime manual in English | [Runtime technical manual](../mcp-antigravity-bridge/README.md) |
 | AGY 协同规则和安全边界 | [agy-supervisor 技能](../skills/agy-supervisor/SKILL.md) |
+| 协同 Demo 和验收步骤 | [Demo](demo.md) |
+| 安全问题报告 | [SECURITY.md](../SECURITY.md) |
 | 研究资料 | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
 ## 技术文档分层
@@ -24,7 +26,7 @@
 
 `mcp-antigravity-bridge/README.md` 是 Python MCP 包的技术手册，和
 `pyproject.toml`、`src/`、`tests/` 放在同一目录，方便安装包的开发者直接查看。
-它不是项目首页；项目首页统一从根目录的 `README.md` 和 `README.en.md` 开始。
+它不是项目首页；项目首页统一从根目录的 `README.md` 和 `README.zh-CN.md` 开始。
 运行时手册目前以英文维护，根目录提供完整的中英文项目入口和双语进度记录。
 
 ### 设计与执行记录
@@ -41,8 +43,9 @@
 
 ## 文档命名约定
 
-- `README.md`：中文项目入口。
-- `README.en.md`：英文项目入口。
+- `README.md`：英文项目入口。
+- `README.en.md`：英文项目入口兼兼容链接。
+- `README.zh-CN.md`：中文项目入口。
 - `PROGRESS.md`：中文项目进度。
 - `PROGRESS.en.md`：英文项目进度。
 - `mcp-antigravity-bridge/README.md`：包级运行时技术手册。

@@ -144,6 +144,7 @@ def agy_collab_start(
     dangerously_skip_permissions: bool = False,
     display_mode: str = "headless",
     max_tasks: int = 4,
+    dry_run: bool = False,
 ) -> str:
     """Start an explicit multi-task collaboration session.
 
@@ -159,10 +160,11 @@ def agy_collab_start(
         shared_contract=shared_contract,
         base_ref=base_ref,
         worktree_root=worktree_root,
-        timeout=timeout,
+        timeout=_validate_timeout(timeout),
         dangerously_skip_permissions=dangerously_skip_permissions,
         display_mode=display_mode,
         max_tasks=max_tasks,
+        dry_run=dry_run,
     )
     return json.dumps(result, ensure_ascii=False)
 

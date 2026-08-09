@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a reproducible bridge or setup problem.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the package version or Git commit.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest reproduction without secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true

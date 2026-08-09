@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import sys
@@ -68,6 +69,7 @@ class _SessionRecord:
     project_dir: Path
     worktree_root: Path
     base_ref: str
+    base_commit: str
     target_branch: str
     shared_contract: str
     display_mode: str
@@ -112,10 +114,10 @@ class GitWorktreeManager:
         target_branch = self._git(root, "branch", "--show-current") or " detached HEAD"
         return root, target_branch.strip()
 
-    def validate_base_ref(self, project_dir: Path, base_ref: str) -> None:
+    def validate_base_ref(self, project_dir: Path, base_ref: str) -> str:
         if not base_ref or not _BASE_REF.fullmatch(base_ref):
             raise ValueError("base_ref must be a simple Git ref such as HEAD or main")
-        self._git(project_dir, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
+        return self._git(project_dir, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
 
     def create(
         self,
@@ -129,17 +131,42 @@ class GitWorktreeManager:
         workdir.parent.mkdir(parents=True, exist_ok=True)
         self._git(project_dir, "worktree", "add", "-b", branch, str(workdir), base_ref)
 
-    def inspect(self, project_dir: Path, workdir: Path, base_ref: str) -> dict[str, Any]:
+    def inspect(
+        self,
+        project_dir: Path,
+        workdir: Path,
+        base_ref: str,
+        owned_paths: Sequence[str] = (),
+    ) -> dict[str, Any]:
         if not workdir.is_dir():
             return {"available": False, "error": "worktree directory is missing"}
 
         try:
             status = self._git(workdir, "status", "--porcelain")
-            changed = self._git(workdir, "diff", "--name-only", f"{base_ref}...HEAD")
-            uncommitted = self._git(workdir, "status", "--short")
+            committed = self._git(
+                workdir, "diff", "--name-status", "-z", "-M", f"{base_ref}...HEAD"
+            )
+            staged = self._git(
+                workdir, "diff", "--cached", "--name-status", "-z", "-M"
+            )
+            uncommitted = self._git(
+                workdir, "diff", "--name-status", "-z", "-M"
+            )
+            untracked = self._git(workdir, "ls-files", "--others", "--exclude-standard")
         except RuntimeError as exc:
             return {"available": False, "error": str(exc)}
 
+        committed_files, committed_deleted = _git_status_paths(committed)
+        staged_files, staged_deleted = _git_status_paths(staged)
+        uncommitted_files, uncommitted_deleted = _git_status_paths(uncommitted)
+        uncommitted_files = _unique(staged_files + uncommitted_files)
+        untracked_files = _lines(untracked)
+        deleted_files = _unique(
+            committed_deleted + staged_deleted + uncommitted_deleted
+        )
+        changed_files = _unique(
+            committed_files + uncommitted_files + untracked_files
+        )
         return {
             "available": True,
             "dirty": bool(status),
@@ -149,8 +176,15 @@ class GitWorktreeManager:
                 and self._git_succeeds(workdir, "diff", "--check")
                 else "failed"
             ),
-            "changed_files": [line for line in changed.splitlines() if line],
-            "uncommitted": [line for line in uncommitted.splitlines() if line],
+            "committed": committed_files,
+            "uncommitted": uncommitted_files,
+            "untracked": untracked_files,
+            "deleted": deleted_files,
+            "changed_files": changed_files,
+            "scope_status": _scope_status(changed_files, owned_paths),
+            "scope_violations": [
+                path for path in changed_files if not _path_in_scope(path, owned_paths)
+            ],
         }
 
 
@@ -178,13 +212,21 @@ class CollaborationRegistry:
         dangerously_skip_permissions: bool = False,
         display_mode: str = "headless",
         max_tasks: int = _MAX_TASKS,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         if not tasks:
             raise ValueError("tasks must contain at least one task")
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than zero")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(float(timeout))
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be a positive finite number")
         if not isinstance(shared_contract, str):
             raise ValueError("shared_contract must be a string")
+        if not isinstance(dry_run, bool):
+            raise ValueError("dry_run must be a boolean")
         if display_mode not in {"headless", "terminal"}:
             raise ValueError("display_mode must be 'headless' or 'terminal'")
         if display_mode == "terminal" and sys.platform != "win32":
@@ -206,7 +248,7 @@ class CollaborationRegistry:
         specs = [CollaborationTask.from_mapping(task) for task in tasks]
         _validate_task_contract(specs)
         root, target_branch = self._worktrees.validate_project(project_dir)
-        self._worktrees.validate_base_ref(root, base_ref)
+        base_commit = self._worktrees.validate_base_ref(root, base_ref)
 
         root_parent = root.parent
         session_root_base = (
@@ -219,6 +261,38 @@ class CollaborationRegistry:
 
         session_id = uuid4().hex[:12]
         session_root = session_root_base / session_id
+        planned_tasks = [
+            {
+                "id": spec.task_id,
+                "role": spec.role,
+                "branch": f"codex-agy/{session_id}/{spec.task_id}",
+                "workdir": str(session_root / spec.task_id),
+                "owned_paths": list(spec.owned_paths),
+                "acceptance": list(spec.acceptance),
+                "verification": list(spec.verification),
+            }
+            for spec in specs
+        ]
+        if dry_run:
+            return {
+                "session_id": session_id,
+                "state": "dry-run",
+                "project_dir": str(root),
+                "base_ref": base_ref,
+                "base_commit": base_commit,
+                "target_branch": target_branch,
+                "worktree_root": str(session_root),
+                "merge_policy": "manual",
+                "shared_contract": shared_contract.strip(),
+                "display_mode": display_mode,
+                "max_tasks": max_tasks,
+                "task_count": len(planned_tasks),
+                "next_step": (
+                    "Run again with dry_run=false to create worktrees and start agy tasks."
+                ),
+                "tasks": planned_tasks,
+            }
+
         session_root.mkdir(parents=True, exist_ok=False)
         records: list[_TaskRecord] = []
 
@@ -233,6 +307,7 @@ class CollaborationRegistry:
             project_dir=root,
             worktree_root=session_root,
             base_ref=base_ref,
+            base_commit=base_commit,
             target_branch=target_branch,
             shared_contract=shared_contract.strip(),
             display_mode=display_mode,
@@ -283,6 +358,12 @@ class CollaborationRegistry:
                 job_status = self._jobs.status(record.job_id)
             state = str(job_status.get("state", "unknown"))
             states.append(state)
+            worktree = self._worktrees.inspect(
+                session.project_dir,
+                record.workdir,
+                session.base_commit,
+                record.spec.owned_paths,
+            )
             task_snapshot: dict[str, Any] = {
                 "id": record.spec.task_id,
                 "role": record.spec.role,
@@ -294,9 +375,9 @@ class CollaborationRegistry:
                 "acceptance": list(record.spec.acceptance),
                 "verification": list(record.spec.verification),
                 "acceptance_status": "manual",
-                "worktree": self._worktrees.inspect(
-                    session.project_dir, record.workdir, session.base_ref
-                ),
+                "worktree": worktree,
+                "scope_status": worktree.get("scope_status", "unknown"),
+                "scope_violations": worktree.get("scope_violations", []),
             }
             if record.spec.forbidden_paths:
                 task_snapshot["forbidden_paths"] = list(record.spec.forbidden_paths)
@@ -315,6 +396,29 @@ class CollaborationRegistry:
         else:
             state = "queued"
 
+        worktrees = [
+            task["worktree"]
+            for task in task_snapshots
+            if isinstance(task.get("worktree"), dict)
+        ]
+        scope_statuses = [str(worktree.get("scope_status", "unknown")) for worktree in worktrees]
+        if any(status == "unknown" for status in scope_statuses):
+            scope_status = "unknown"
+        elif any(status == "violated" for status in scope_statuses):
+            scope_status = "violated"
+        else:
+            scope_status = "passed"
+        scope_violations = _unique(
+            path
+            for worktree in worktrees
+            for path in worktree.get("scope_violations", [])
+        )
+        changed_files = _unique(
+            path
+            for worktree in worktrees
+            for path in worktree.get("changed_files", [])
+        )
+
         return {
             "session_id": session.session_id,
             "state": state,
@@ -327,6 +431,9 @@ class CollaborationRegistry:
             "display_mode": session.display_mode,
             "max_tasks": session.max_tasks,
             "task_count": len(session.tasks),
+            "scope_status": scope_status,
+            "scope_violations": scope_violations,
+            "changed_files": changed_files,
             "next_step": (
                 "Review each worktree, run acceptance checks, then merge branches manually."
             ),
@@ -357,12 +464,13 @@ def _path_list(raw: Mapping[str, Any], key: str, required: bool) -> tuple[str, .
     values = _string_list(raw, key, required)
     normalized: list[str] = []
     for value in values:
-        path = value.replace("\\", "/").strip("/")
+        path = value.replace("\\", "/")
+        if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+            raise ValueError(f"task {key} must contain relative paths")
+        path = path.rstrip("/")
         parts = path.split("/")
         if not path or path == "." or ".." in parts:
             raise ValueError(f"task {key} must contain relative paths without '..'")
-        if re.match(r"^[A-Za-z]:", path):
-            raise ValueError(f"task {key} must contain relative paths")
         normalized.append(path)
     return tuple(normalized)
 
@@ -392,6 +500,58 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _lines(value: str) -> list[str]:
+    return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+def _git_status_paths(value: str) -> tuple[list[str], list[str]]:
+    """Return all changed paths and pure deletion paths from Git name-status output."""
+    tokens = value.split("\0")
+    paths: list[str] = []
+    deleted: list[str] = []
+    index = 0
+    while index < len(tokens):
+        status = tokens[index]
+        index += 1
+        if not status:
+            continue
+        kind = status[0]
+        if kind in {"R", "C"}:
+            if index + 1 >= len(tokens):
+                break
+            old_path, new_path = tokens[index : index + 2]
+            index += 2
+            paths.extend(path for path in (old_path, new_path) if path)
+            continue
+        if index >= len(tokens):
+            break
+        path = tokens[index]
+        index += 1
+        if path:
+            paths.append(path)
+            if kind == "D":
+                deleted.append(path)
+    return paths, deleted
+
+
+def _unique(values: Sequence[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def _path_in_scope(path: str, owned_paths: Sequence[str]) -> bool:
+    normalized = path.replace("\\", "/").strip("/")
+    return any(
+        normalized == owned or normalized.startswith(f"{owned}/")
+        for owned in owned_paths
+    )
+
+
+def _scope_status(changed_files: Sequence[str], owned_paths: Sequence[str]) -> str:
+    if not changed_files or all(_path_in_scope(path, owned_paths) for path in changed_files):
+        return "passed"
+    return "violated"
 
 
 def _build_prompt(session: _SessionRecord, record: _TaskRecord) -> str:

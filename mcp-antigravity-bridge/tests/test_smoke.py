@@ -48,6 +48,8 @@ def test_resolve_agy_environment_prefers_explicit_proxy(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AGY_PROXY_URL", "http://127.0.0.1:7892")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    monkeypatch.setattr(agy_runner, "_probe_local_proxy_port", lambda port: None)
+    monkeypatch.setattr(agy_runner, "_cached_runtime_proxy", lambda force=False: None)
 
     env = resolve_agy_environment(force=True)
 
