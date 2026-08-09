@@ -55,9 +55,10 @@ def resolve_proxy(explicit: str | None = None, no_proxy: bool = False) -> str | 
             )
         return proxy
     for name in _PROXY_ENV:
-        proxy = _normalise_proxy(os.environ.get(name))
-        if proxy:
-            return proxy
+        for env_name in (name, name.lower()):
+            proxy = _normalise_proxy(os.environ.get(env_name))
+            if proxy:
+                return proxy
     return None
 
 

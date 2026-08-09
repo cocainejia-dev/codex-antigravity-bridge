@@ -241,6 +241,78 @@ def test_start_rejects_overlapping_owned_paths(tmp_path: Path) -> None:
         )
 
 
+def test_start_rejects_absolute_and_unc_owned_paths(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    registry = CollaborationRegistry(jobs=FakeJobs())
+
+    for path in ("/backend", r"\server\share"):
+        with pytest.raises(ValueError, match="relative paths"):
+            registry.start(
+                project_dir=str(repo),
+                tasks=[
+                    {
+                        "id": "backend",
+                        "prompt": "Implement the API.",
+                        "owned_paths": [path],
+                        "acceptance": ["pass"],
+                    }
+                ],
+            )
+
+
+def test_status_reports_both_ends_of_uncommitted_rename(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "backend").mkdir()
+    (repo / "backend" / "old.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "add", "backend")
+    _git(repo, "commit", "-m", "add backend file")
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "backend",
+                "prompt": "Rename the backend file.",
+                "owned_paths": ["backend"],
+                "acceptance": ["rename is reviewed"],
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {"job_id": job_id, "state": "completed", "exit_code": 0}
+    workdir = Path(started["tasks"][0]["workdir"])
+    _git(workdir, "mv", "backend/old.py", "outside.py")
+
+    status = registry.status(started["session_id"])
+    worktree = status["tasks"][0]["worktree"]
+
+    assert "backend/old.py" in worktree["changed_files"]
+    assert "outside.py" in worktree["changed_files"]
+    assert status["scope_status"] == "violated"
+    assert "outside.py" in status["scope_violations"]
+
+
+def test_start_rejects_nonfinite_timeout(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    registry = CollaborationRegistry(jobs=FakeJobs())
+
+    with pytest.raises(ValueError, match="timeout"):
+        registry.start(
+            project_dir=str(repo),
+            timeout=float("nan"),
+            tasks=[
+                {
+                    "id": "backend",
+                    "prompt": "Implement the API.",
+                    "owned_paths": ["backend"],
+                    "acceptance": ["pass"],
+                }
+            ],
+        )
+
+
 def test_start_rejects_more_tasks_than_the_session_limit(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     registry = CollaborationRegistry(jobs=FakeJobs())

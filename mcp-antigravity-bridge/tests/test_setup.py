@@ -12,6 +12,16 @@ def test_resolve_proxy_rejects_embedded_credentials() -> None:
         setup.resolve_proxy("http://user:secret@127.0.0.1:7890")
 
 
+def test_resolve_proxy_reads_lowercase_environment_names(monkeypatch) -> None:
+    monkeypatch.setattr(
+        setup.os,
+        "environ",
+        {"https_proxy": "http://127.0.0.1:7890"},
+    )
+
+    assert setup.resolve_proxy() == "http://127.0.0.1:7890"
+
+
 def test_update_codex_config_preserves_unmanaged_settings(tmp_path: Path) -> None:
     config = tmp_path / "config.toml"
     config.write_text(

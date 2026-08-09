@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import sys
@@ -142,29 +143,27 @@ class GitWorktreeManager:
 
         try:
             status = self._git(workdir, "status", "--porcelain")
-            committed = self._git(workdir, "diff", "--name-only", f"{base_ref}...HEAD")
-            uncommitted = self._git(workdir, "diff", "--name-only")
+            committed = self._git(
+                workdir, "diff", "--name-status", "-z", "-M", f"{base_ref}...HEAD"
+            )
+            staged = self._git(
+                workdir, "diff", "--cached", "--name-status", "-z", "-M"
+            )
+            uncommitted = self._git(
+                workdir, "diff", "--name-status", "-z", "-M"
+            )
             untracked = self._git(workdir, "ls-files", "--others", "--exclude-standard")
-            deleted = self._git(
-                workdir,
-                "diff",
-                "--name-only",
-                "--diff-filter=D",
-                f"{base_ref}...HEAD",
-            )
-            deleted += "\n" + self._git(
-                workdir,
-                "diff",
-                "--name-only",
-                "--diff-filter=D",
-            )
         except RuntimeError as exc:
             return {"available": False, "error": str(exc)}
 
-        committed_files = _lines(committed)
-        uncommitted_files = _lines(uncommitted)
+        committed_files, committed_deleted = _git_status_paths(committed)
+        staged_files, staged_deleted = _git_status_paths(staged)
+        uncommitted_files, uncommitted_deleted = _git_status_paths(uncommitted)
+        uncommitted_files = _unique(staged_files + uncommitted_files)
         untracked_files = _lines(untracked)
-        deleted_files = _unique(_lines(deleted))
+        deleted_files = _unique(
+            committed_deleted + staged_deleted + uncommitted_deleted
+        )
         changed_files = _unique(
             committed_files + uncommitted_files + untracked_files
         )
@@ -217,8 +216,13 @@ class CollaborationRegistry:
     ) -> dict[str, Any]:
         if not tasks:
             raise ValueError("tasks must contain at least one task")
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than zero")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(float(timeout))
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be a positive finite number")
         if not isinstance(shared_contract, str):
             raise ValueError("shared_contract must be a string")
         if not isinstance(dry_run, bool):
@@ -460,12 +464,13 @@ def _path_list(raw: Mapping[str, Any], key: str, required: bool) -> tuple[str, .
     values = _string_list(raw, key, required)
     normalized: list[str] = []
     for value in values:
-        path = value.replace("\\", "/").strip("/")
+        path = value.replace("\\", "/")
+        if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+            raise ValueError(f"task {key} must contain relative paths")
+        path = path.rstrip("/")
         parts = path.split("/")
         if not path or path == "." or ".." in parts:
             raise ValueError(f"task {key} must contain relative paths without '..'")
-        if re.match(r"^[A-Za-z]:", path):
-            raise ValueError(f"task {key} must contain relative paths")
         normalized.append(path)
     return tuple(normalized)
 
@@ -499,6 +504,36 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 def _lines(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+def _git_status_paths(value: str) -> tuple[list[str], list[str]]:
+    """Return all changed paths and pure deletion paths from Git name-status output."""
+    tokens = value.split("\0")
+    paths: list[str] = []
+    deleted: list[str] = []
+    index = 0
+    while index < len(tokens):
+        status = tokens[index]
+        index += 1
+        if not status:
+            continue
+        kind = status[0]
+        if kind in {"R", "C"}:
+            if index + 1 >= len(tokens):
+                break
+            old_path, new_path = tokens[index : index + 2]
+            index += 2
+            paths.extend(path for path in (old_path, new_path) if path)
+            continue
+        if index >= len(tokens):
+            break
+        path = tokens[index]
+        index += 1
+        if path:
+            paths.append(path)
+            if kind == "D":
+                deleted.append(path)
+    return paths, deleted
 
 
 def _unique(values: Sequence[str]) -> list[str]:
