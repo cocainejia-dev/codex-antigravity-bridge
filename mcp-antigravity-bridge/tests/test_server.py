@@ -30,6 +30,16 @@ def test_agy_ask_rejects_nonzero_exit(monkeypatch):
         server.agy_ask("Say hi")
 
 
+def test_agy_ask_propagates_runner_timeout(monkeypatch):
+    def timed_out(*args, **kwargs):
+        raise TimeoutError("agy timed out after 1s")
+
+    monkeypatch.setattr(server, "run_agy", timed_out)
+
+    with pytest.raises(TimeoutError, match="agy timed out"):
+        server.agy_ask("Say hi", timeout=1)
+
+
 def test_agy_ask_reports_proxy_failure_without_requesting_login(monkeypatch):
     monkeypatch.setattr(
         server,

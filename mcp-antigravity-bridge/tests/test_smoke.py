@@ -3,6 +3,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from codex_agy_bridge import agy_runner
 from codex_agy_bridge.agy_runner import (
     classify_agy_error,
@@ -17,6 +19,16 @@ from codex_agy_bridge.agy_runner import (
 def test_clean_agy_output_removes_ansi():
     raw = "\x1b[32mOK\x1b[0m\r\n\x1b[?25l"
     assert clean_agy_output(raw) == "OK"
+
+
+@pytest.mark.parametrize("raw", [None, "", b"", b"OK"])
+def test_clean_agy_output_normalizes_empty_and_bytes(raw):
+    expected = "OK" if raw == b"OK" else ""
+    assert clean_agy_output(raw) == expected
+
+
+def test_clean_agy_output_decodes_invalid_bytes_without_raising():
+    assert clean_agy_output(b"OK\xff") == "OK\ufffd"
 
 
 def test_clean_agy_output_drops_pure_chrome_lines():
@@ -202,6 +214,100 @@ def test_run_agy_retries_when_direct_output_is_only_tui_chrome(monkeypatch):
     assert result.text == "RECOVERED"
     assert result.used_pty is True
     assert captured["pty_calls"] == 1
+
+
+@pytest.mark.parametrize("stdout", [None, "", b"", b"OK"])
+def test_run_agy_handles_direct_stdout_variants_and_falls_back(monkeypatch, stdout):
+    captured = {"pty_calls": 0}
+
+    def fake_run(args, workdir, timeout, env=None):
+        return subprocess.CompletedProcess(args, 0, stdout, None)
+
+    def fake_pty(args, workdir, timeout, env=None):
+        captured["pty_calls"] += 1
+        return "PTY OK", 0
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_with_pty", fake_pty)
+
+    result = run_agy("Say hi")
+
+    assert result.text == ("OK" if stdout == b"OK" else "PTY OK")
+    assert captured["pty_calls"] == (0 if stdout == b"OK" else 1)
+
+
+@pytest.mark.parametrize("stderr", [None, "", b"", b"failure"])
+def test_run_agy_handles_direct_stderr_variants(monkeypatch, stderr):
+    def fake_run(args, workdir, timeout, env=None):
+        return subprocess.CompletedProcess(args, 7, None, stderr)
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+
+    result = run_agy("Say hi")
+
+    expected = (
+        "failure"
+        if stderr == b"failure"
+        else "agy returned no diagnostic output"
+    )
+    assert result.text == expected
+    assert result.exit_code == 7
+
+
+def test_run_agy_preserves_unicode_workdir_on_fallback(monkeypatch):
+    captured = {}
+
+    def fake_run(args, workdir, timeout, env=None):
+        return subprocess.CompletedProcess(args, 0, None, None)
+
+    def fake_pty(args, workdir, timeout, env=None):
+        captured["workdir"] = workdir
+        return "中文 OK", 0
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_with_pty", fake_pty)
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.sys.platform", "linux")
+
+    result = run_agy("Say hi", workdir="D:\\工作区\\中文")
+
+    assert result.text == "中文 OK"
+    assert captured["workdir"] == "D:\\工作区\\中文"
+
+
+def test_run_agy_propagates_timeout(monkeypatch):
+    def fake_run(args, workdir, timeout, env=None):
+        raise TimeoutError("agy timed out after 1s")
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+
+    with pytest.raises(TimeoutError, match="agy timed out"):
+        run_agy("Say hi", timeout=1)
+
+
+def test_run_agy_repeated_empty_direct_output_is_stable(monkeypatch):
+    calls = {"pty": 0}
+
+    def fake_run(args, workdir, timeout, env=None):
+        return subprocess.CompletedProcess(args, 0, None, None)
+
+    def fake_pty(args, workdir, timeout, env=None):
+        calls["pty"] += 1
+        return "OK", 0
+
+    monkeypatch.setattr("codex_agy_bridge.agy_runner.find_agy", lambda: "agy")
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_subprocess", fake_run)
+    monkeypatch.setattr("codex_agy_bridge.agy_runner._run_with_pty", fake_pty)
+
+    for _ in range(20):
+        result = run_agy("Say hi")
+        assert result.text == "OK"
+        assert "NoneType" not in result.text
+
+    assert calls["pty"] == 20
 
 
 def test_run_agy_preserves_direct_stderr_when_pty_has_no_output(monkeypatch):

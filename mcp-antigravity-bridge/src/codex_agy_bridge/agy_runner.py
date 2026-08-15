@@ -88,8 +88,20 @@ _AUTH_ERROR_MARKERS = (
 )
 
 
-def clean_agy_output(raw: str) -> str:
+def _coerce_output(raw: object) -> str:
+    """Normalize subprocess/PTY output before text processing."""
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    if isinstance(raw, str):
+        return raw
+    return str(raw)
+
+
+def clean_agy_output(raw: str | bytes | None) -> str:
     """Strip ANSI escapes, carriage-return repaints and TUI chrome."""
+    raw = _coerce_output(raw)
     text = _ANSI_OSC.sub("", raw)
     text = _ANSI_CSI.sub("", text)
     text = _ANSI_OTHER.sub("", text)
