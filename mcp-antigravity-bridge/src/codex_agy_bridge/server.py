@@ -19,7 +19,7 @@ mcp = FastMCP(
         "Bridge from Codex to the Google Antigravity agent. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
-        "use agy_start and agy_status for explicit asynchronous worktree collaboration "
+        "use agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
         "with a caller-created isolated workdir. "
         "Use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
@@ -46,6 +46,18 @@ def _validate_timeout(timeout: float) -> float:
     ):
         raise ValueError("timeout must be a positive finite number")
     return float(timeout)
+
+
+def _validate_wait_seconds(wait_seconds: float) -> float:
+    """Reject invalid wait_seconds before waiting on an async task."""
+    if (
+        isinstance(wait_seconds, bool)
+        or not isinstance(wait_seconds, (int, float))
+        or not math.isfinite(float(wait_seconds))
+        or wait_seconds <= 0
+    ):
+        raise ValueError("wait_seconds must be a positive finite number")
+    return float(wait_seconds)
 
 
 @mcp.tool()
@@ -104,13 +116,14 @@ def agy_start(
     workdir: str = "",
     timeout: float = 300.0,
     dangerously_skip_permissions: bool = False,
+    task_key: str | None = None,
 ) -> str:
     """Start an asynchronous agy task and return its job id.
 
     Use this for explicit parallel worktree collaboration. The caller must
     provide an existing isolated worktree as workdir; the bridge does not
-    create one. Poll the returned id with ``agy_status`` while Codex continues
-    work elsewhere.
+    create one. Poll the returned id with ``agy_status`` or wait with ``agy_wait``
+    while Codex continues work elsewhere.
     """
     if not workdir.strip():
         raise ValueError(
@@ -124,6 +137,7 @@ def agy_start(
         workdir=workdir or None,
         timeout=_validate_timeout(timeout),
         dangerously_skip_permissions=dangerously_skip_permissions,
+        task_key=task_key,
     )
 
 
@@ -131,6 +145,22 @@ def agy_start(
 def agy_status(job_id: str) -> str:
     """Return JSON status for an asynchronous agy task."""
     return json.dumps(agy_jobs.status(job_id), ensure_ascii=False)
+
+
+@mcp.tool()
+def agy_wait(
+    job_id: str,
+    wait_seconds: float = 120.0,
+) -> str:
+    """Wait for an asynchronous agy task to complete within a bounded duration.
+
+    Returns JSON status. If the job is unknown, completed, or failed, it returns
+    immediately. If queued or running, it waits up to `wait_seconds` for completion.
+    If the wait expires before completion, the current active status is returned
+    without cancelling or killing the background task.
+    """
+    valid_wait = _validate_wait_seconds(wait_seconds)
+    return json.dumps(agy_jobs.wait(job_id, wait_seconds=valid_wait), ensure_ascii=False)
 
 
 @mcp.tool()

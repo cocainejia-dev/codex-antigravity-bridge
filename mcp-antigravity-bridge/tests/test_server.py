@@ -97,3 +97,42 @@ def test_public_tools_reject_nonpositive_timeouts(tmp_path):
 
     with pytest.raises(ValueError, match="positive finite number"):
         server.agy_ask("Say hi", timeout=float("nan"))
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_wait("job-1", wait_seconds=0)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_wait("job-1", wait_seconds=-1)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_wait("job-1", wait_seconds=float("nan"))
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_wait("job-1", wait_seconds=float("inf"))
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        server.agy_wait("job-1", wait_seconds=True)
+
+
+def test_agy_wait_returns_json(monkeypatch):
+    monkeypatch.setattr(
+        server.agy_jobs,
+        "wait",
+        lambda job_id, wait_seconds: {"job_id": job_id, "state": "completed", "text": "DONE"},
+    )
+    result_str = server.agy_wait("test-id", wait_seconds=30.0)
+    assert '"state": "completed"' in result_str
+    assert '"job_id": "test-id"' in result_str
+
+
+def test_agy_start_forwards_task_key(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_start(*args, **kwargs):
+        captured.update(kwargs)
+        return "job-123"
+
+    monkeypatch.setattr(server.agy_jobs, "start", fake_start)
+    job_id = server.agy_start("Run task", workdir=str(tmp_path), task_key="my-key")
+    assert job_id == "job-123"
+    assert captured.get("task_key") == "my-key"
