@@ -407,13 +407,13 @@ def run_agy(
             stderr=direct_stderr,
         )
 
-    fallback_exit_code = (
-        direct.returncode
-        if direct.returncode != 0
-        else (exit_code if exit_code != 0 else -1)
-    )
+    fallback_exit_code = direct.returncode if direct.returncode != 0 else (exit_code or -1)
     return AgyResult(
-        text=direct_stderr or "agy produced no output; PTY fallback was unavailable",
+        text=(
+            direct_stderr
+            or f"agy produced no output; PTY fallback produced no output "
+            f"(exit code {exit_code})"
+        ),
         exit_code=fallback_exit_code,
         used_pty=True,
         stderr=direct_stderr,
@@ -517,24 +517,45 @@ def _run_with_conpty(
     proc = PtyProcess.spawn(args, cwd=workdir, env=env)
     chunks: list[str] = []
     deadline = time.monotonic() + timeout
+    completed = False
+    exit_status: Optional[int] = None
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f"agy timed out after {timeout}s")
+            fileobj = getattr(proc, "fileobj", None)
+            if fileobj is not None:
+                fileobj.settimeout(min(1.0, remaining))
             try:
                 chunk = proc.read(4096)
+            except socket.timeout:
+                if not proc.isalive():
+                    completed = True
+                    break
+                continue
             except EOFError:
+                if proc.isalive():
+                    raise RuntimeError("ConPTY reader reached EOF while agy was still running")
+                completed = True
                 break
             if not chunk:
                 if proc.isalive():
-                    time.sleep(0.1)
                     continue
+                completed = True
                 break
             chunks.append(chunk)
     finally:
-        proc.terminate(force=True)
-    return "".join(chunks), proc.exitstatus if proc.exitstatus is not None else -1
+        if not completed and proc.isalive():
+            proc.terminate(force=True)
+        exit_status = proc.exitstatus
+        close = getattr(proc, "close", None)
+        if close is not None:
+            try:
+                close()
+            except OSError:
+                pass
+    return "".join(chunks), exit_status if exit_status is not None else -1
 
 
 def _run_with_posix_pty(

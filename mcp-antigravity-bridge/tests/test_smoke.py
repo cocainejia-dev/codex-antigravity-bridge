@@ -343,7 +343,7 @@ def test_run_agy_classifies_empty_direct_and_pty_output_as_failure(monkeypatch):
     result = run_agy("Say hi")
 
     assert result.exit_code == -1
-    assert "no output" in result.text
+    assert result.text == "agy produced no output; PTY fallback produced no output (exit code 0)"
 
 
 def test_run_with_conpty_uses_winpty_and_propagates_output(monkeypatch):
@@ -369,6 +369,9 @@ def test_run_with_conpty_uses_winpty_and_propagates_output(monkeypatch):
         def terminate(self, force=False):
             calls["terminate"] = force
 
+        def close(self):
+            calls["close"] = True
+
     monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
     monkeypatch.setattr(agy_runner.sys, "platform", "win32")
 
@@ -377,7 +380,8 @@ def test_run_with_conpty_uses_winpty_and_propagates_output(monkeypatch):
     assert output == "PTY output"
     assert exit_code == 7
     assert calls["spawn"] == (["agy", "-p", "hi"], "C:\\work", {"A": "B"})
-    assert calls["terminate"] is True
+    assert "terminate" not in calls
+    assert calls["close"] is True
 
 
 def test_run_with_conpty_normalizes_missing_exitstatus(monkeypatch):
@@ -397,6 +401,9 @@ def test_run_with_conpty_normalizes_missing_exitstatus(monkeypatch):
         def terminate(self, force=False):
             pass
 
+        def close(self):
+            pass
+
     monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
     monkeypatch.setattr(agy_runner.sys, "platform", "win32")
 
@@ -404,6 +411,47 @@ def test_run_with_conpty_normalizes_missing_exitstatus(monkeypatch):
 
     assert output == ""
     assert exit_code == -1
+
+
+def test_run_with_conpty_terminates_only_after_timeout(monkeypatch):
+    calls = {}
+    clock = iter((0.0, 1.0))
+
+    class FakeProcess:
+        exitstatus = None
+
+        @classmethod
+        def spawn(cls, args, cwd=None, env=None):
+            return cls()
+
+        def read(self, size):
+            raise AssertionError("read should not be called after timeout")
+
+        def isalive(self):
+            return True
+
+        def terminate(self, force=False):
+            calls["terminate"] = force
+
+    monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
+    monkeypatch.setattr(agy_runner.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(TimeoutError, match="agy timed out"):
+        agy_runner._run_with_conpty(["agy", "-p", "hi"], None, 1)
+
+    assert calls["terminate"] is True
+
+
+def test_run_with_conpty_preserves_spawn_exception(monkeypatch):
+    class FakeProcess:
+        @classmethod
+        def spawn(cls, args, cwd=None, env=None):
+            raise OSError("spawn failed")
+
+    monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
+
+    with pytest.raises(OSError, match="spawn failed"):
+        agy_runner._run_with_conpty(["agy", "-p", "hi"], None, 1)
 
 
 def test_run_with_conpty_reports_missing_dependency(monkeypatch):
