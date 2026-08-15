@@ -4,7 +4,7 @@
 issue #76): when stdout is not attached to a real terminal it can emit
 nothing and exit 0. This module tries the plain subprocess path first and,
 when the result comes back empty, re-runs `agy` inside a freshly allocated
-pseudo-terminal (ConPTY on Windows via `pywinpty`, `pty` on POSIX), then
+pseudo-terminal (ConPTY on Windows via `winpty`, `pty` on POSIX), then
 strips ANSI / TUI chrome from the captured output.
 
 Reference implementations:
@@ -507,9 +507,12 @@ def _run_with_conpty(
     env: Optional[dict[str, str]] = None,
 ) -> tuple[str, int]:
     try:
-        from pywinpty import PtyProcess  # type: ignore
+        from winpty import PtyProcess  # type: ignore
     except ImportError:
-        return "", -1
+        raise RuntimeError(
+            "Windows ConPTY fallback requires the optional 'pywinpty' dependency "
+            "(import name: winpty)"
+        ) from None
 
     proc = PtyProcess.spawn(args, cwd=workdir, env=env)
     chunks: list[str] = []
@@ -531,7 +534,7 @@ def _run_with_conpty(
             chunks.append(chunk)
     finally:
         proc.terminate(force=True)
-    return "".join(chunks), proc.exitstatus
+    return "".join(chunks), proc.exitstatus if proc.exitstatus is not None else -1
 
 
 def _run_with_posix_pty(

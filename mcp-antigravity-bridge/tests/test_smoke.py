@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -343,6 +344,74 @@ def test_run_agy_classifies_empty_direct_and_pty_output_as_failure(monkeypatch):
 
     assert result.exit_code == -1
     assert "no output" in result.text
+
+
+def test_run_with_conpty_uses_winpty_and_propagates_output(monkeypatch):
+    calls = {}
+
+    class FakeProcess:
+        exitstatus = 7
+
+        @classmethod
+        def spawn(cls, args, cwd=None, env=None):
+            calls["spawn"] = (args, cwd, env)
+            return cls()
+
+        def read(self, size):
+            if not calls.get("read"):
+                calls["read"] = True
+                return "PTY output"
+            raise EOFError
+
+        def isalive(self):
+            return False
+
+        def terminate(self, force=False):
+            calls["terminate"] = force
+
+    monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
+    monkeypatch.setattr(agy_runner.sys, "platform", "win32")
+
+    output, exit_code = agy_runner._run_with_conpty(["agy", "-p", "hi"], "C:\\work", 2, {"A": "B"})
+
+    assert output == "PTY output"
+    assert exit_code == 7
+    assert calls["spawn"] == (["agy", "-p", "hi"], "C:\\work", {"A": "B"})
+    assert calls["terminate"] is True
+
+
+def test_run_with_conpty_normalizes_missing_exitstatus(monkeypatch):
+    class FakeProcess:
+        exitstatus = None
+
+        @classmethod
+        def spawn(cls, args, cwd=None, env=None):
+            return cls()
+
+        def read(self, size):
+            raise EOFError
+
+        def isalive(self):
+            return False
+
+        def terminate(self, force=False):
+            pass
+
+    monkeypatch.setitem(sys.modules, "winpty", types.SimpleNamespace(PtyProcess=FakeProcess))
+    monkeypatch.setattr(agy_runner.sys, "platform", "win32")
+
+    output, exit_code = agy_runner._run_with_conpty(["agy", "-p", "hi"], None, 2)
+
+    assert output == ""
+    assert exit_code == -1
+
+
+def test_run_with_conpty_reports_missing_dependency(monkeypatch):
+    monkeypatch.setitem(sys.modules, "winpty", None)
+    monkeypatch.setattr(agy_runner.sys, "platform", "win32")
+
+    with pytest.raises(RuntimeError, match="pywinpty.*winpty"):
+        agy_runner._run_with_conpty(["agy", "-p", "hi"], None, 2)
 
 
 def test_run_agy_visible_uses_a_new_console(monkeypatch):
