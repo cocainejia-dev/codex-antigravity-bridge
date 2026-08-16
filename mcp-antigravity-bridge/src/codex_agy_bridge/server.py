@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from pathlib import Path
@@ -20,8 +21,9 @@ mcp = FastMCP(
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
         "use agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
-        "with a caller-created isolated workdir. "
-        "Use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
+        "with a caller-created isolated workdir; "
+        "use agy_jobs_recent to inspect durable task history; "
+        "use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
         "Codex reviews and merges branches manually. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
@@ -58,6 +60,18 @@ def _validate_wait_seconds(wait_seconds: float) -> float:
     ):
         raise ValueError("wait_seconds must be a positive finite number")
     return float(wait_seconds)
+
+
+def _validate_limit(limit: int) -> int:
+    """Reject invalid limit before querying recent task history."""
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or limit < 1
+        or limit > 100
+    ):
+        raise ValueError("limit must be an integer between 1 and 100")
+    return limit
 
 
 @mcp.tool()
@@ -142,13 +156,14 @@ def agy_start(
 
 
 @mcp.tool()
-def agy_status(job_id: str) -> str:
+async def agy_status(job_id: str) -> str:
     """Return JSON status for an asynchronous agy task."""
-    return json.dumps(agy_jobs.status(job_id), ensure_ascii=False)
+    result = await asyncio.to_thread(agy_jobs.status, job_id)
+    return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
-def agy_wait(
+async def agy_wait(
     job_id: str,
     wait_seconds: float = 120.0,
 ) -> str:
@@ -160,7 +175,26 @@ def agy_wait(
     without cancelling or killing the background task.
     """
     valid_wait = _validate_wait_seconds(wait_seconds)
-    return json.dumps(agy_jobs.wait(job_id, wait_seconds=valid_wait), ensure_ascii=False)
+    result = await asyncio.to_thread(agy_jobs.wait, job_id, wait_seconds=valid_wait)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def agy_jobs_recent(
+    limit: int = 20,
+    task_key: str = "",
+    state: str = "",
+) -> str:
+    """Return a newest-first summary of recent asynchronous agy tasks.
+
+    Args:
+        limit: Maximum number of recent jobs to return (1..100, default 20).
+        task_key: Optional filter by task key.
+        state: Optional filter by job state (e.g. 'completed', 'failed', 'running').
+    """
+    valid_limit = _validate_limit(limit)
+    records = agy_jobs.recent(limit=valid_limit, task_key=task_key, state=state)
+    return json.dumps(records, ensure_ascii=False)
 
 
 @mcp.tool()
