@@ -646,7 +646,9 @@ class AgyJobRegistry:
             health = durable["health"]
             rec_state = durable["recovery_state"]
 
-            if rec_state == "interrupted" or (health == "INTERRUPTED" and state == "unknown"):
+            if state not in ("completed", "failed") and (
+                rec_state == "interrupted" or (health == "INTERRUPTED" and state == "unknown")
+            ):
                 status = {
                     "job_id": durable["job_id"],
                     "state": "unknown",

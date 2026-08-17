@@ -233,12 +233,14 @@ class DurableJobStore:
                             row_state = row["state"]
                             row_health = row["health"]
                             row_rec = row["recovery_state"]
-
                             if row_state in ("submitted", "queued", "running"):
                                 raise RuntimeError(
                                     f"DUPLICATE_ACTIVE_TASK: task_key '{task_key}' is already active on job {row_job_id}"
                                 )
-                            if row_rec == "interrupted" or (row_health == "INTERRUPTED" and row_state == "unknown"):
+                            if row_state not in ("completed", "failed") and (
+                                row_rec == "interrupted"
+                                or (row_health == "INTERRUPTED" and row_state == "unknown")
+                            ):
                                 raise RuntimeError(
                                     f"RECOVERY_REQUIRED: task_key '{task_key}' is in interrupted state from previous session on job {row_job_id}"
                                 )
@@ -416,6 +418,7 @@ class DurableJobStore:
                         UPDATE durable_jobs
                         SET state = ?,
                             health = ?,
+                            recovery_state = NULL,
                             exit_code = ?,
                             error = ?,
                             result_text = ?,
@@ -525,7 +528,10 @@ class DurableJobStore:
                 row = cur.fetchone()
                 if row is None:
                     return None
-                return dict(row)
+                item = dict(row)
+                if item.get("state") in ("completed", "failed"):
+                    item["recovery_state"] = None
+                return item
             except Exception as err:
                 if "DURABLE_SCHEMA_UNSUPPORTED" in str(err):
                     raise
@@ -569,6 +575,8 @@ class DurableJobStore:
                 results = []
                 for row in rows:
                     item = dict(row)
+                    if item.get("state") in ("completed", "failed"):
+                        item["recovery_state"] = None
                     item["result_truncated"] = bool(item["result_truncated"])
                     item["used_pty"] = bool(item["used_pty"])
                     results.append(item)
