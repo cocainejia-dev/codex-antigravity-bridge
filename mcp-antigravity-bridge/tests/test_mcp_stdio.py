@@ -45,6 +45,12 @@ def test_mcp_stdio_server_lists_all_tools() -> None:
         "agy_collab_start",
         "agy_collab_status",
         "agy_jobs_recent",
+        "run_start",
+        "run_status",
+        "run_observe",
+        "run_wait",
+        "run_result",
+        "run_cancel",
     }
 
 

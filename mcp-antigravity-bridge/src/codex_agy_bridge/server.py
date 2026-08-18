@@ -13,11 +13,30 @@ from mcp.server.fastmcp import FastMCP
 from .agy_collaboration import agy_collaborations
 from .agy_jobs import agy_jobs
 from .agy_runner import AgyResult, describe_agy_failure, run_agy
+from .contracts import (
+    AutoCommitPolicy,
+    InvalidStateTransitionError,
+    RiskClass,
+    RunRecord,
+    RunState,
+    TaskContract,
+)
+from .run_control import (
+    ConcurrentModificationError,
+    CredentialSecurityError,
+    DurableRunManager,
+    DurableRunStore,
+    DuplicateRunError,
+    RunControlError,
+    RunNotFoundError,
+    RunNotTerminalError,
+    WorkerResult,
+)
 
 mcp = FastMCP(
     "codex-agy-bridge",
     instructions=(
-        "Bridge from Codex to the Google Antigravity agent. "
+        "Bridge from Codex to the Google Antigravity agent and VNext durable run control. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
         "use agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
@@ -25,7 +44,8 @@ mcp = FastMCP(
         "use agy_jobs_recent to inspect durable task history; "
         "use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
-        "Codex reviews and merges branches manually. "
+        "Codex reviews and merges branches manually; "
+        "use run_start, run_status, run_observe, run_wait, run_result, and run_cancel for VNext durable runs. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
     ),
@@ -72,6 +92,31 @@ def _validate_limit(limit: int) -> int:
     ):
         raise ValueError("limit must be an integer between 1 and 100")
     return limit
+
+
+def _validate_positive_finite(val: float, name: str = "value") -> float:
+    """Reject invalid numeric values (bool, NaN, Infinity, non-positive)."""
+    if (
+        isinstance(val, bool)
+        or not isinstance(val, (int, float))
+        or not math.isfinite(float(val))
+        or val <= 0
+    ):
+        raise ValueError(f"{name} must be a positive finite number")
+    return float(val)
+
+
+def _validate_db_path(db_path: str) -> str:
+    """Validate that db_path is an explicit non-empty path under caller control."""
+    if isinstance(db_path, bool) or not isinstance(db_path, str):
+        raise ValueError("db_path must be a non-empty string path")
+    cleaned = db_path.strip()
+    if not cleaned:
+        raise ValueError("db_path must be a non-empty string path")
+    path = Path(cleaned).expanduser()
+    if path.is_dir():
+        raise ValueError(f"db_path cannot be a directory: {cleaned}")
+    return cleaned
 
 
 @mcp.tool()
@@ -237,3 +282,138 @@ def agy_collab_start(
 def agy_collab_status(session_id: str) -> str:
     """Return aggregated status for an MVP collaboration session."""
     return json.dumps(agy_collaborations.status(session_id), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_start(
+    db_path: str,
+    task: dict[str, Any],
+    idempotency_key: str | None = None,
+    run_id: str | None = None,
+    auto_spawn: bool = False,
+    worktree: str | None = None,
+    repo: str | None = None,
+    base_head: str | None = None,
+    attempt: int = 0,
+    repair_round: int = 0,
+) -> str:
+    """Start a durable run tracking a VNext TaskContract specification.
+
+    Persists an initial CREATED RunRecord into the caller-specified db_path.
+    Auto_spawn is false by default because MCP JSON cannot carry Python callbacks;
+    execution wiring is internal.
+    """
+    valid_db_path = _validate_db_path(db_path)
+    if isinstance(task, str):
+        try:
+            task = json.loads(task)
+        except Exception as exc:
+            raise ValueError("task must be a valid dict or JSON object") from exc
+    if not isinstance(task, dict):
+        raise ValueError("task must be a dictionary representing a TaskContract")
+
+    manager = DurableRunManager(valid_db_path)
+    record = manager.run_start(
+        task,
+        idempotency_key=idempotency_key or None,
+        run_id=run_id or None,
+        auto_spawn=auto_spawn,
+        worktree=worktree or None,
+        repo=repo or None,
+        base_head=base_head or None,
+        attempt=attempt,
+        repair_round=repair_round,
+    )
+    return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_status(
+    db_path: str,
+    run_id: str,
+) -> str:
+    """Return durable RunRecord JSON for a run."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    manager = DurableRunManager(valid_db_path)
+    record = manager.run_status(run_id.strip())
+    return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_observe(
+    db_path: str,
+    run_id: str,
+    stale_heartbeat_threshold_seconds: float = 60.0,
+) -> str:
+    """Observe run status, checking process and heartbeat liveness and exposing recovery state."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    valid_threshold = _validate_positive_finite(stale_heartbeat_threshold_seconds, "stale_heartbeat_threshold_seconds")
+    manager = DurableRunManager(valid_db_path)
+    obs = manager.run_observe(run_id.strip(), stale_heartbeat_threshold_seconds=valid_threshold)
+    obs_dict = {
+        "run_id": obs.run_id,
+        "state": obs.state.value,
+        "state_version": obs.state_version,
+        "is_terminal": obs.is_terminal,
+        "is_alive": obs.is_alive,
+        "is_stale": obs.is_stale,
+        "pid": obs.pid,
+        "heartbeat": obs.heartbeat,
+        "recovery_state": obs.recovery_state.value if obs.recovery_state else None,
+        "reason": obs.reason,
+        "record": obs.record.to_dict(),
+    }
+    return json.dumps(obs_dict, ensure_ascii=False)
+
+
+@mcp.tool()
+def run_wait(
+    db_path: str,
+    run_id: str,
+    timeout: float = 120.0,
+    poll_interval: float = 0.05,
+) -> str:
+    """Wait for a run to reach a terminal state within a bounded timeout without cancelling."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    valid_timeout = _validate_timeout(timeout)
+    valid_poll = _validate_positive_finite(poll_interval, "poll_interval")
+    manager = DurableRunManager(valid_db_path)
+    record = manager.run_wait(run_id.strip(), timeout=valid_timeout, poll_interval=valid_poll)
+    return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_result(
+    db_path: str,
+    run_id: str,
+) -> str:
+    """Retrieve terminal result evidence for a run; raises error if non-terminal."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    manager = DurableRunManager(valid_db_path)
+    record = manager.run_result(run_id.strip())
+    return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_cancel(
+    db_path: str,
+    run_id: str,
+    reason: str = "User requested cancellation",
+) -> str:
+    """Cooperatively request cancellation for a run."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    if isinstance(reason, bool) or not isinstance(reason, str):
+        raise ValueError("reason must be a string")
+    manager = DurableRunManager(valid_db_path)
+    record = manager.run_cancel(run_id.strip(), reason=reason)
+    return json.dumps(record.to_dict(), ensure_ascii=False)
