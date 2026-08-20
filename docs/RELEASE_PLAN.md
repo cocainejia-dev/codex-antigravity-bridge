@@ -1,25 +1,27 @@
 # Release Plan
 
-## Phase 11.2R / Canonical Runtime Cutover
+## Phase 11.2R / R3 Reproducible Verification Tooling
 
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 verification source provenance: PASS.
-- Last verified commit: `3cded09512ade486387d6eb251f31c2d8f393491`.
+- Last verified commit: `414cd43`.
 - Canonical repository status: PASS.
 - Static canonical runtime provenance: PASS.
 - Fresh-client runtime acceptance: PASS.
 - MCP runtime cutover: PASS.
+- R3 reproducibility defect: FIXED.
+- Project-declared dev tooling: YES; Ruff `>=0.16,<0.17`.
+- Fresh environment verification: PASS (`281 passed, 1 warning`).
 - Current state: WAITING_FOR_USER_DIRECTION.
 - Current task: WAITING_FOR_USER_DIRECTION.
-- Current release blockers: RUFF deferred; R3 remains frozen pending user
-  direction.
+- Current release blockers: none for R3.
 - Next safe action: WAIT_FOR_USER_DIRECTION.
-- READY_FOR_R3: NO.
+- READY_FOR_R3: YES.
+- READY_FOR_NEXT_RELEASE_STABILIZATION_STEP: YES.
 
-R3 reproducible verification tooling must not start before fresh-client
-runtime acceptance passes. This plan records the gate, not a live runtime
-process list or durable job database state.
+R3 reproducible verification tooling is complete. This plan records stable
+project status, not a live runtime process list or durable job database state.
 
 ## Subsequent phases
 

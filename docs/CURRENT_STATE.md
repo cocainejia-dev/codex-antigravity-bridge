@@ -7,10 +7,10 @@
 - `RUNTIME_RESOLVED_HEAD`: discover at startup; do not write the containing
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
-- `CURRENT_PHASE`: `PHASE 11.2R / CANONICAL RUNTIME CUTOVER`.
+- `CURRENT_PHASE`: `PHASE 11.2R / R3 REPRODUCIBLE VERIFICATION TOOLING`.
 - `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
 - `STATE`: `WAITING_FOR_USER_DIRECTION`.
-- `LAST_VERIFIED_COMMIT`: `3cded09512ade486387d6eb251f31c2d8f393491` (R2).
+- `LAST_VERIFIED_COMMIT`: `414cd43` (R3 tooling).
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 source provenance: PASS.
@@ -20,7 +20,17 @@
 - `FRESH_CLIENT_RUNTIME_ACCEPTANCE`: PASS.
 - `MCP_RUNTIME_CUTOVER`: `PASS`; target identity is
   `codex-agy-vnext`.
-- `READY_FOR_R3`: NO.
+- `R3_REPRODUCIBILITY_DEFECT`: FIXED.
+- `PROJECT_DECLARED_DEV_TOOLING`: YES.
+- `RUFF_PROJECT_MANAGED`: YES; version range `>=0.16,<0.17`.
+- `RUFF_VERSION_DEFINED`: YES.
+- `VERIFY_ENTRYPOINT_REPRODUCIBLE`: YES.
+- `FRESH_ENV_INSTALL`: PASS.
+- `FRESH_ENV_VERIFY`: PASS.
+- `MANUAL_PYTHONPATH_REQUIRED`: NO.
+- `GLOBAL_TOOLING_REQUIRED`: NO.
+- `GLOBAL_PYTHON_ENV_MUTATED`: NO.
+- `READY_FOR_R3`: YES.
 
 ## Repository Roles
 
@@ -31,11 +41,10 @@
 
 ## Release Blockers and Deferred Work
 
-- Ruff remains `DEFERRED_EXISTING_ENVIRONMENT_BLOCKER`.
+- R3 reproducible verification tooling: PASS.
 - Fresh-client runtime acceptance: PASS (fresh controller smoke and one
   disposable durable async acceptance).
 - MCP runtime cutover: PASS.
-- R3 reproducible verification tooling remains frozen pending user direction.
 - `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
 
 ## Verification
@@ -48,11 +57,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 ```
 
-The historical VNext/canonical baseline was `281 passed` with one known
-`pydantic_settings` warning; that result is not a current-run claim.
-Canonical acceptance additionally requires a fresh `.venv` provenance probe
-for `codex_agy_bridge.__file__`, `server.__file__`, `agy_jobs.__file__`, and
-`agy_runner.__file__`, followed by the configured verification commands.
+R3 fresh-environment acceptance produced `281 passed, 1 warning`, Ruff
+`0.16.4`, compileall PASS, source provenance PASS, and diff-check PASS. The
+warning is the existing `pydantic_settings` incomplete forward-reference
+warning. The authoritative entrypoint is `scripts/verify.ps1`; it defaults to
+the repository `.venv` and accepts `-Python <path>` for a disposable project
+environment.
 
 ## Machine-Local Runtime Facts
 
