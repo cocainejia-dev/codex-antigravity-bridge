@@ -1,13 +1,19 @@
-# Legacy Inventory
+# Repository and Runtime Inventory
 
-`D:\软件开发\codex-antigravity-vnext` is the authoritative source repository.
+`D:\软件开发\git仓库\桥接git仓库` is the sole authoritative repository,
+development worktree, verification source, release source, and Codex handoff
+entry point.
 
-`D:\软件开发\codex-antigravity-bridge` is a historical/production reference
-clone. It is not a source dependency for VNext and must not be copied wholesale
-or used as the verification source. Its editable installation may remain
-machine-local, but VNext verification must override it and attest resolved
-paths.
+`D:\软件开发\codex-antigravity-vnext` is `PRE_MIGRATION_REFERENCE_ONLY`.
+It preserves the pre-migration history and must not receive new source, test,
+documentation, release, or AGY worktree changes.
+
+`D:\软件开发\codex-antigravity-bridge` is `LEGACY_REFERENCE_ONLY`.
+It is a historical/production reference clone and must not be used as the
+canonical verification or MCP source. Its global editable installation may
+remain machine-local; do not delete or modify it during normal consolidation.
 
 AppData durable databases, old worktrees, reviewer relays, chat transcripts,
-Antigravity caches, and user Codex configuration are runtime or private state;
-they are not portable project inputs.
+Antigravity caches, OAuth/token state, and user Codex configuration are runtime
+or private state. They are not portable project inputs and must not be added to
+Git.
