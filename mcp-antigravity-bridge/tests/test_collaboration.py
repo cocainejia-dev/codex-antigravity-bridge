@@ -335,3 +335,115 @@ def test_status_reports_unknown_session() -> None:
         "state": "unknown",
         "error": "collaboration session not found",
     }
+
+
+def test_implementation_completion_requires_effective_diff(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "backend",
+                "role": "Backend",
+                "prompt": "Implement backend endpoints (expected_mutation=True).",
+                "owned_paths": ["backend/"],
+                "acceptance": ["endpoints implemented"],
+                "expected_mutation": True,
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {
+        "job_id": job_id,
+        "state": "completed",
+        "text": "Completed task without file changes.",
+        "exit_code": 0,
+        "used_pty": False,
+    }
+
+    status = registry.status(started["session_id"])
+    task = status["tasks"][0]
+
+    assert task["worktree"]["changed_files"] == []
+    assert status["state"] != "ready_for_review"
+    assert task.get("progress") == "NO_PROGRESS"
+
+
+def test_read_only_completion_without_diff_remains_successful(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "auditor",
+                "role": "SecurityAuditor",
+                "prompt": "Audit codebase for security issues without making file modifications.",
+                "owned_paths": ["reports/"],
+                "acceptance": ["audit report verified"],
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {
+        "job_id": job_id,
+        "state": "completed",
+        "text": "Audit complete: no issues found.",
+        "exit_code": 0,
+        "used_pty": False,
+    }
+
+    status = registry.status(started["session_id"])
+    task = status["tasks"][0]
+
+    assert task["state"] == "completed"
+    assert task["worktree"]["dirty"] is False
+    assert task["worktree"]["changed_files"] == []
+    assert status["state"] == "ready_for_review"
+
+
+def test_implementation_with_allowed_diff_is_progress(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    jobs = FakeJobs()
+    registry = CollaborationRegistry(jobs=jobs)
+    started = registry.start(
+        project_dir=str(repo),
+        tasks=[
+            {
+                "id": "backend",
+                "role": "Backend",
+                "prompt": "Implement API endpoint.",
+                "owned_paths": ["backend/"],
+                "acceptance": ["API endpoint works"],
+            }
+        ],
+    )
+
+    job_id = jobs.started[0]["job_id"]
+    jobs.states[job_id] = {
+        "job_id": job_id,
+        "state": "completed",
+        "text": "API endpoint implemented.",
+        "exit_code": 0,
+        "used_pty": False,
+    }
+    workdir = Path(started["tasks"][0]["workdir"])
+    (workdir / "backend").mkdir()
+    (workdir / "backend" / "api.py").write_text("API = True\n", encoding="utf-8")
+
+    status = registry.status(started["session_id"])
+    task = status["tasks"][0]
+
+    assert task["state"] == "completed"
+    assert task["worktree"]["dirty"] is True
+    assert "backend/api.py" in task["worktree"]["changed_files"]
+    assert task["scope_status"] == "passed"
+    assert status["state"] == "ready_for_review"
+    assert status["changed_files"] == ["backend/api.py"]

@@ -29,6 +29,7 @@ class CollaborationTask:
     forbidden_paths: tuple[str, ...]
     acceptance: tuple[str, ...]
     verification: tuple[str, ...]
+    expected_mutation: bool = False
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "CollaborationTask":
@@ -43,6 +44,7 @@ class CollaborationTask:
         forbidden_paths = _path_list(raw, "forbidden_paths", required=False)
         acceptance = _string_list(raw, "acceptance", required=True)
         verification = _string_list(raw, "verification", required=False)
+        expected_mutation = _optional_bool(raw, "expected_mutation", default=False)
 
         return cls(
             task_id=task_id,
@@ -52,6 +54,7 @@ class CollaborationTask:
             forbidden_paths=forbidden_paths,
             acceptance=acceptance,
             verification=verification,
+            expected_mutation=expected_mutation,
         )
 
 
@@ -270,6 +273,7 @@ class CollaborationRegistry:
                 "owned_paths": list(spec.owned_paths),
                 "acceptance": list(spec.acceptance),
                 "verification": list(spec.verification),
+                "expected_mutation": spec.expected_mutation,
             }
             for spec in specs
         ]
@@ -347,6 +351,7 @@ class CollaborationRegistry:
     def _snapshot(self, session: _SessionRecord, include_job_output: bool) -> dict[str, Any]:
         task_snapshots: list[dict[str, Any]] = []
         states: list[str] = []
+        has_no_progress = False
         for record in session.tasks:
             if record.job_id is None:
                 job_status: dict[str, Any] = {
@@ -374,6 +379,7 @@ class CollaborationRegistry:
                 "owned_paths": list(record.spec.owned_paths),
                 "acceptance": list(record.spec.acceptance),
                 "verification": list(record.spec.verification),
+                "expected_mutation": record.spec.expected_mutation,
                 "acceptance_status": "manual",
                 "worktree": worktree,
                 "scope_status": worktree.get("scope_status", "unknown"),
@@ -385,12 +391,37 @@ class CollaborationRegistry:
                 for key in ("text", "error", "exit_code", "used_pty"):
                     if key in job_status:
                         task_snapshot[key] = job_status[key]
+
+            changed_files = (
+                worktree.get("changed_files", [])
+                if isinstance(worktree, dict)
+                else []
+            )
+            has_in_scope_diff = any(
+                _path_in_scope(path, record.spec.owned_paths)
+                for path in changed_files
+            )
+            if record.spec.expected_mutation:
+                if state == "completed":
+                    if has_in_scope_diff:
+                        task_snapshot["progress"] = "PROGRESS"
+                        task_snapshot["implementation_progress"] = True
+                    else:
+                        task_snapshot["progress"] = "NO_PROGRESS"
+                        task_snapshot["implementation_progress"] = False
+                        has_no_progress = True
+                else:
+                    task_snapshot["implementation_progress"] = False
+
             task_snapshots.append(task_snapshot)
 
         if any(state in {"failed", "unknown"} for state in states):
             state = "failed"
         elif states and all(state == "completed" for state in states):
-            state = "ready_for_review"
+            if has_no_progress:
+                state = "no_progress"
+            else:
+                state = "ready_for_review"
         elif any(state == "running" for state in states):
             state = "running"
         else:
@@ -446,6 +477,15 @@ def _required_string(raw: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"task {key} must be a non-empty string")
     return value.strip()
+
+
+def _optional_bool(raw: Mapping[str, Any], key: str, default: bool = False) -> bool:
+    if key not in raw:
+        return default
+    value = raw[key]
+    if not isinstance(value, bool):
+        raise ValueError(f"task {key} must be a boolean")
+    return value
 
 
 def _string_list(raw: Mapping[str, Any], key: str, required: bool) -> tuple[str, ...]:
