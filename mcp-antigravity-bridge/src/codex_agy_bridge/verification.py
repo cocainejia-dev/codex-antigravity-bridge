@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import time
 from typing import Any, Callable, Optional, Sequence
 
@@ -38,6 +39,8 @@ DEFAULT_MAX_DIFF_LINES: int = 2_000
 DEFAULT_MAX_CHANGED_FILES: int = 50
 DEFAULT_COMMAND_TIMEOUT_SECONDS: float = 120.0
 DEFAULT_MAX_REPAIR_ROUNDS: int = 3
+SOURCE_PROVENANCE_MISMATCH: str = "SOURCE_PROVENANCE_MISMATCH"
+_CONTROLLER_SRC_ROOT: Path = Path(__file__).resolve().parents[1]
 
 # Patterns for extracting failed tests from command output
 PYTEST_FAIL_PATTERN = re.compile(r"(?:FAILED|ERROR)\s+([^\s:]+(?:::[^\s:]+)+)", re.MULTILINE)
@@ -246,6 +249,13 @@ class VerificationEvidence:
     error_message: str | None = None
     timestamp: str = field(default_factory=_utc_now_iso)
     repair_round: int = 0
+    expected_source_root: str | None = None
+    resolved_package_file: str | None = None
+    resolved_module_paths: list[str] = field(default_factory=list)
+    interpreter: str | None = None
+    provenance_status: str = "UNCHECKED"
+    provenance_verified: bool = False
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.validate()
@@ -283,6 +293,13 @@ class VerificationEvidence:
             "error_message": self.error_message,
             "timestamp": self.timestamp,
             "repair_round": self.repair_round,
+            "expected_source_root": self.expected_source_root,
+            "resolved_package_file": self.resolved_package_file,
+            "resolved_module_paths": list(self.resolved_module_paths),
+            "interpreter": self.interpreter,
+            "provenance_status": self.provenance_status,
+            "provenance_verified": self.provenance_verified,
+            "provenance": dict(self.provenance),
         }
 
     @classmethod
@@ -315,6 +332,13 @@ class VerificationEvidence:
             error_message=data.get("error_message"),
             timestamp=str(data.get("timestamp", _utc_now_iso())),
             repair_round=int(data.get("repair_round", 0)),
+            expected_source_root=data.get("expected_source_root"),
+            resolved_package_file=data.get("resolved_package_file"),
+            resolved_module_paths=[str(p) for p in data.get("resolved_module_paths", [])],
+            interpreter=data.get("interpreter"),
+            provenance_status=str(data.get("provenance_status", "UNCHECKED")),
+            provenance_verified=bool(data.get("provenance_verified", False)),
+            provenance=dict(data.get("provenance", {})),
         )
 
     def to_json(self, **kwargs: Any) -> str:
@@ -722,6 +746,185 @@ def _split_command(cmd: str) -> list[str]:
         return cmd.strip().split()
 
 
+def detect_expected_source_root(workdir: Path | str | None = None) -> Path:
+    """Detect expected source root for codex_agy_bridge package."""
+    if workdir is not None:
+        resolved = Path(workdir).resolve()
+        candidate = resolved / "mcp-antigravity-bridge" / "src"
+        if (candidate / "codex_agy_bridge").exists():
+            return candidate.resolve()
+        candidate_src = resolved / "src"
+        if (candidate_src / "codex_agy_bridge").exists():
+            return candidate_src.resolve()
+        if (resolved / "codex_agy_bridge").exists():
+            return resolved
+    return _CONTROLLER_SRC_ROOT.resolve()
+
+
+def build_controller_env(
+    expected_root: Path,
+    base_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Construct a clean environment with expected_root first in PYTHONPATH and foreign codex entries removed."""
+    env = dict(base_env if base_env is not None else os.environ)
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    expected_str = str(expected_root.resolve())
+
+    cleaned_entries: list[str] = [expected_str]
+    if existing_pythonpath:
+        for entry in existing_pythonpath.split(os.pathsep):
+            entry_str = entry.strip()
+            if not entry_str:
+                continue
+            try:
+                entry_path = Path(entry_str).resolve()
+                if entry_path == expected_root.resolve():
+                    continue
+                if (entry_path / "codex_agy_bridge").exists():
+                    continue
+            except Exception:
+                pass
+            cleaned_entries.append(entry_str)
+
+    env["PYTHONPATH"] = os.pathsep.join(cleaned_entries)
+    return env
+
+
+def attest_source_provenance(
+    expected_root: Path,
+    env: dict[str, str],
+    cwd: Path,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Execute cold subprocess attestation checking codex_agy_bridge module resolution against expected_root."""
+    attestation_script = (
+        "import json, sys, os\n"
+        "res = {'interpreter': sys.executable, 'cwd': os.getcwd()}\n"
+        "try:\n"
+        "    import codex_agy_bridge\n"
+        "    import codex_agy_bridge.server\n"
+        "    res['package_file'] = os.path.abspath(codex_agy_bridge.__file__) if hasattr(codex_agy_bridge, '__file__') and codex_agy_bridge.__file__ else None\n"
+        "    res['server_file'] = os.path.abspath(codex_agy_bridge.server.__file__) if hasattr(codex_agy_bridge.server, '__file__') and codex_agy_bridge.server.__file__ else None\n"
+        "    res['status'] = 'OK'\n"
+        "except Exception as exc:\n"
+        "    res['package_file'] = None\n"
+        "    res['server_file'] = None\n"
+        "    res['status'] = 'ERROR'\n"
+        "    res['error'] = str(exc)\n"
+        "print(json.dumps(res))\n"
+    )
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", "-c", attestation_script],
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "status": SOURCE_PROVENANCE_MISMATCH,
+            "verified": False,
+            "expected_source_root": str(expected_root),
+            "resolved_package_file": None,
+            "resolved_module_paths": [],
+            "interpreter": sys.executable,
+            "error": f"Attestation subprocess failed: {exc}",
+            "provenance": {"error": str(exc)},
+        }
+
+    stdout = proc.stdout.strip()
+    data: dict[str, Any] = {}
+    if stdout:
+        try:
+            data = json.loads(stdout)
+        except Exception:
+            for line in stdout.splitlines():
+                line = line.strip()
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        data = json.loads(line)
+                        break
+                    except Exception:
+                        pass
+
+    pkg_file_str = data.get("package_file")
+    srv_file_str = data.get("server_file")
+    interpreter = data.get("interpreter") or sys.executable
+
+    resolved_paths: list[str] = []
+    if pkg_file_str:
+        resolved_paths.append(pkg_file_str)
+    if srv_file_str and srv_file_str != pkg_file_str:
+        resolved_paths.append(srv_file_str)
+
+    provenance_dict: dict[str, Any] = {
+        "expected_source_root": str(expected_root),
+        "package_file": pkg_file_str,
+        "server_file": srv_file_str,
+        "interpreter": interpreter,
+        "cwd": str(cwd),
+        "module_paths": resolved_paths,
+        "raw": data,
+    }
+
+    if not pkg_file_str or not srv_file_str:
+        err = data.get("error") or "Failed to import codex_agy_bridge or codex_agy_bridge.server"
+        provenance_dict["error"] = err
+        return {
+            "status": SOURCE_PROVENANCE_MISMATCH,
+            "verified": False,
+            "expected_source_root": str(expected_root),
+            "resolved_package_file": pkg_file_str,
+            "resolved_module_paths": resolved_paths,
+            "interpreter": interpreter,
+            "error": f"Provenance import failure: {err}",
+            "provenance": provenance_dict,
+        }
+
+    pkg_path = Path(pkg_file_str).resolve()
+    srv_path = Path(srv_file_str).resolve()
+    exp_root_res = expected_root.resolve()
+
+    try:
+        pkg_path.relative_to(exp_root_res)
+        srv_path.relative_to(exp_root_res)
+        is_under_root = True
+    except ValueError:
+        is_under_root = False
+
+    if not is_under_root:
+        mismatch_msg = (
+            f"Source provenance mismatch: package '{pkg_path}' or server '{srv_path}' "
+            f"resolved outside expected source root '{exp_root_res}'"
+        )
+        provenance_dict["error"] = mismatch_msg
+        return {
+            "status": SOURCE_PROVENANCE_MISMATCH,
+            "verified": False,
+            "expected_source_root": str(exp_root_res),
+            "resolved_package_file": str(pkg_path),
+            "resolved_module_paths": [str(pkg_path), str(srv_path)],
+            "interpreter": interpreter,
+            "error": mismatch_msg,
+            "provenance": provenance_dict,
+        }
+
+    return {
+        "status": "PASS",
+        "verified": True,
+        "expected_source_root": str(exp_root_res),
+        "resolved_package_file": str(pkg_path),
+        "resolved_module_paths": [str(pkg_path), str(srv_path)],
+        "interpreter": interpreter,
+        "error": None,
+        "provenance": provenance_dict,
+    }
+
+
 def execute_verification_command(
     cmd_str: str,
     cwd: Path,
@@ -753,10 +956,31 @@ def execute_verification_command(
         duration = time.monotonic() - start_time
         clean_stdout = _sanitize_output(_truncate_output(proc.stdout, max_output_bytes))
         clean_stderr = _sanitize_output(_truncate_output(proc.stderr, max_output_bytes))
+        exit_code = proc.returncode
+
+        # Minimal optional provenance validation when command imports codex_agy_bridge and outputs module files
+        expected_root = detect_expected_source_root(cwd)
+        if exit_code == 0 and clean_stdout:
+            for line in clean_stdout.splitlines():
+                trimmed = line.strip()
+                if "codex_agy_bridge" in trimmed and (trimmed.endswith(".py") or ("\\" in trimmed or "/" in trimmed)):
+                    try:
+                        p = Path(trimmed).resolve()
+                        if p.exists() and (p.name.endswith(".py") or (p / "__init__.py").exists()):
+                            try:
+                                p.relative_to(expected_root.resolve())
+                            except ValueError:
+                                exit_code = 1
+                                clean_stderr = (
+                                    f"Source provenance mismatch: module path '{p}' resolved outside expected source root '{expected_root.resolve()}'\n{clean_stderr}"
+                                ).strip()
+                                break
+                    except Exception:
+                        pass
 
         return CommandResult(
             command=cmd_str,
-            exit_code=proc.returncode,
+            exit_code=exit_code,
             stdout=clean_stdout,
             stderr=clean_stderr,
             duration_seconds=duration,
@@ -801,6 +1025,19 @@ def run_verification(
     resolved_workdir = Path(workdir or contract.workdir).resolve()
     resolved_run_id = run_id or f"run-{contract.task_id}-verif"
 
+    # 1. Determine expected source root and bind controller environment
+    expected_root = detect_expected_source_root(resolved_workdir)
+    merged_env = os.environ.copy()
+    if env is not None:
+        merged_env.update(env)
+    effective_env = build_controller_env(expected_root, merged_env)
+
+    # 2. Cold child subprocess attestation
+    attestation = attest_source_provenance(expected_root, effective_env, cwd=resolved_workdir)
+    provenance_status = attestation["status"]
+    provenance_verified = attestation["verified"]
+    provenance_passed = provenance_status == "PASS"
+
     command_results: list[CommandResult] = []
     exit_codes: list[int] = []
     all_failed_tests: list[str] = []
@@ -808,7 +1045,11 @@ def run_verification(
     all_commands_passed = True
     error_messages: list[str] = []
 
-    # 1. Execute verification commands deterministically
+    if not provenance_passed:
+        err_prov = attestation.get("error") or "Source provenance verification failed"
+        error_messages.append(err_prov)
+
+    # 3. Execute verification commands deterministically
     for cmd in contract.verification_commands:
         if not cmd.strip():
             continue
@@ -817,7 +1058,7 @@ def run_verification(
             cwd=resolved_workdir,
             timeout=timeout_per_command,
             max_output_bytes=max_output_bytes,
-            env=env,
+            env=effective_env,
         )
         command_results.append(res)
         exit_codes.append(res.exit_code)
@@ -839,13 +1080,13 @@ def run_verification(
             else:
                 error_messages.append(f"Command '{cmd}' failed with exit code {res.exit_code}")
 
-    # 2. Evaluate scope gate
+    # 4. Evaluate scope gate
     scope_result = evaluate_scope_gate(contract, resolved_workdir)
     if not scope_result.passed:
         error_messages.extend(scope_result.violations)
 
-    # 3. Overall pass requires all verification commands to exit 0 and scope gate to pass
-    passed = all_commands_passed and scope_result.passed
+    # 5. Overall pass requires provenance pass, all verification commands to exit 0, and scope gate to pass
+    passed = provenance_passed and all_commands_passed and scope_result.passed
 
     combined_error = "; ".join(error_messages) if error_messages else None
 
@@ -864,6 +1105,13 @@ def run_verification(
         scope_violations=scope_result.violations,
         error_message=combined_error,
         repair_round=repair_round,
+        expected_source_root=attestation.get("expected_source_root") or str(expected_root),
+        resolved_package_file=attestation.get("resolved_package_file"),
+        resolved_module_paths=attestation.get("resolved_module_paths", []),
+        interpreter=attestation.get("interpreter"),
+        provenance_status=provenance_status,
+        provenance_verified=provenance_verified,
+        provenance=attestation.get("provenance", {}),
     )
     return evidence
 
