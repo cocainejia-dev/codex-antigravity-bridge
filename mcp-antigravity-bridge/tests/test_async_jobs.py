@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import threading
 import time
@@ -131,6 +132,84 @@ def test_status_reports_running_job(monkeypatch=None):
             assert isinstance(status["elapsed_seconds"], float)
             assert status["elapsed_seconds"] >= 0.0
         finally:
+            registry.close()
+            if monkeypatch is None:
+                mp.undo()
+
+
+def test_soft_budget_exceeded_with_fresh_heartbeat_remains_live(monkeypatch=None):
+    """W1 RED: a hard runner timeout is currently recorded as terminal failure."""
+    mp = monkeypatch or _SimpleMonkeyPatch()
+    unblock = threading.Event()
+
+    def liveness_aware_runner(*args, **kwargs):
+        if kwargs.get("liveness_probe") is None:
+            raise TimeoutError("agy timed out after 0.05s")
+        assert unblock.wait(timeout=2.0)
+        return AgyResult(text="DONE", exit_code=0, used_pty=False)
+
+    mp.setattr("codex_agy_bridge.agy_jobs.run_agy", liveness_aware_runner)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        registry = AgyJobRegistry(
+            db_path=Path(tmp_dir) / "jobs.sqlite3",
+            watchdog_interval=0.02,
+            stale_heartbeat_threshold=0.2,
+        )
+        try:
+            job_id = registry.start("Long live task", timeout=0.05)
+            time.sleep(0.15)
+            status = registry.status(job_id)
+            assert status["state"] == "running"
+            assert status["health"] in {"HEALTHY", "QUEUED"}
+            unblock.set()
+            assert registry.wait(job_id, wait_seconds=1.0)["state"] == "completed"
+        finally:
+            unblock.set()
+            registry.close()
+            if monkeypatch is None:
+                mp.undo()
+
+
+def test_soft_budget_exceeded_with_recent_worktree_activity_remains_live(monkeypatch=None):
+    """W1 RED: worktree activity is observed but cannot prevent hard timeout failure."""
+    mp = monkeypatch or _SimpleMonkeyPatch()
+    unblock = threading.Event()
+
+    def liveness_aware_runner(*args, **kwargs):
+        if kwargs.get("liveness_probe") is None:
+            raise TimeoutError("agy timed out after 0.05s")
+        assert unblock.wait(timeout=2.0)
+        return AgyResult(text="DONE", exit_code=0, used_pty=False)
+
+    mp.setattr("codex_agy_bridge.agy_jobs.run_agy", liveness_aware_runner)
+    with tempfile.TemporaryDirectory() as git_dir, tempfile.TemporaryDirectory() as tmp_dir:
+        subprocess.run(["git", "init"], cwd=git_dir, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=git_dir, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=git_dir, capture_output=True, check=True)
+        work_file = Path(git_dir) / "progress.txt"
+        work_file.write_text("initial", encoding="utf-8")
+        subprocess.run(["git", "add", "progress.txt"], cwd=git_dir, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=git_dir, capture_output=True, check=True)
+
+        registry = AgyJobRegistry(
+            db_path=Path(tmp_dir) / "jobs.sqlite3",
+            watchdog_interval=0.02,
+            stale_heartbeat_threshold=0.2,
+            idle_worktree_threshold=0.2,
+        )
+        try:
+            job_id = registry.start("Long live worktree task", workdir=git_dir, timeout=0.05)
+            time.sleep(0.06)
+            work_file.write_text("progress", encoding="utf-8")
+            time.sleep(0.10)
+            status = registry.status(job_id)
+            assert status["state"] == "running"
+            assert status["health"] == "HEALTHY"
+            assert status["last_worktree_activity_at"] is not None
+            unblock.set()
+            assert registry.wait(job_id, wait_seconds=1.0)["state"] == "completed"
+        finally:
+            unblock.set()
             registry.close()
             if monkeypatch is None:
                 mp.undo()

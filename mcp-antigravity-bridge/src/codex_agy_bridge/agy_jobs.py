@@ -92,6 +92,7 @@ class AgyJobRegistry:
         watchdog_interval: float = 20.0,
         stale_heartbeat_threshold: float = 60.0,
         idle_worktree_threshold: float = 60.0,
+        stall_grace_seconds: float = 60.0,
         store_prune_interval: float = 300.0,
         store_retention_seconds: float = DEFAULT_TERMINAL_RETENTION_SECONDS,
     ) -> None:
@@ -99,6 +100,8 @@ class AgyJobRegistry:
             raise ValueError("retention_seconds must be non-negative")
         if watchdog_interval <= 0:
             raise ValueError("watchdog_interval must be positive")
+        if stall_grace_seconds <= 0:
+            raise ValueError("stall_grace_seconds must be positive")
         if store_prune_interval < 0:
             raise ValueError("store_prune_interval must be non-negative")
         if store_retention_seconds < 0:
@@ -109,6 +112,7 @@ class AgyJobRegistry:
         self._watchdog_interval = watchdog_interval
         self._stale_heartbeat_threshold = stale_heartbeat_threshold
         self._idle_worktree_threshold = idle_worktree_threshold
+        self._stall_grace_seconds = stall_grace_seconds
         self._store_prune_interval = store_prune_interval
         self._store_retention_seconds = store_retention_seconds
         self._last_store_prune_mono = monotonic()
@@ -360,6 +364,21 @@ class AgyJobRegistry:
             return "IDLE"
         return "HEALTHY"
 
+    def _liveness_probe(self, job_id: str) -> bool:
+        """Return whether supervisory evidence still proves useful worker progress."""
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None or record.completed_at is not None:
+                return False
+            now = monotonic()
+            heartbeat = record.heartbeat_mono or record.started_mono or record.submitted_mono
+            heartbeat_fresh = now - heartbeat <= self._stale_heartbeat_threshold
+            activity_fresh = (
+                record.last_worktree_activity_mono is not None
+                and now - record.last_worktree_activity_mono <= self._idle_worktree_threshold
+            )
+            return heartbeat_fresh or activity_fresh
+
     def start(
         self,
         prompt: str,
@@ -428,13 +447,21 @@ class AgyJobRegistry:
                     if self._closed or job_id not in self._jobs:
                         raise RuntimeError("REGISTRY_CLOSED: agy job registry is closed")
                 self._mark_started(job_id)
-                res = runner(
+                runner_args = (
                     prompt,
                     workdir,
                     timeout,
                     output_format,
                     dangerously_skip_permissions,
                 )
+                if display_mode == "terminal":
+                    res = runner(*runner_args)
+                else:
+                    res = runner(
+                        *runner_args,
+                        liveness_probe=lambda: self._liveness_probe(job_id),
+                        stall_grace_seconds=self._stall_grace_seconds,
+                    )
                 return res
             except Exception as err:
                 exc = err

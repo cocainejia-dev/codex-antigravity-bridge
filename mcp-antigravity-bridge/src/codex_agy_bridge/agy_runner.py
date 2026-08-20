@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 # --- ANSI / TUI noise stripping -------------------------------------------
@@ -339,6 +339,8 @@ def run_agy(
     timeout: float = 300.0,
     output_format: Optional[str] = None,
     dangerously_skip_permissions: bool = False,
+    liveness_probe: Callable[[], bool] | None = None,
+    stall_grace_seconds: float = 60.0,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -372,7 +374,13 @@ def run_agy(
             pty_workdir = None
 
     environment = resolve_agy_environment()
-    direct = _run_subprocess(args, launch_workdir, timeout, environment)
+    runner_options = {}
+    if liveness_probe is not None:
+        runner_options = {
+            "liveness_probe": liveness_probe,
+            "stall_grace_seconds": stall_grace_seconds,
+        }
+    direct = _run_subprocess(args, launch_workdir, timeout, environment, **runner_options)
     direct_text = clean_agy_output(direct.stdout)
     direct_stderr = clean_agy_output(direct.stderr)
     if direct_text or direct.returncode != 0:
@@ -386,7 +394,9 @@ def run_agy(
         )
 
     try:
-        pty_text, exit_code = _run_with_pty(args, pty_workdir, timeout, environment)
+        pty_text, exit_code = _run_with_pty(
+            args, pty_workdir, timeout, environment, **runner_options
+        )
     except TimeoutError:
         raise
     except Exception as exc:  # noqa: BLE001 - preserve the direct failure context.
@@ -476,16 +486,33 @@ def _run_subprocess(
     workdir: Optional[str],
     timeout: float,
     env: Optional[dict[str, str]] = None,
+    liveness_probe: Callable[[], bool] | None = None,
+    stall_grace_seconds: float = 60.0,
 ) -> subprocess.CompletedProcess:
-    kwargs: dict = {"cwd": workdir, "capture_output": True, "text": True, "timeout": timeout}
+    kwargs: dict = {"cwd": workdir, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if env is not None:
         kwargs["env"] = env
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
+    proc = subprocess.Popen(args, **kwargs)
+    deadline = time.monotonic() + timeout
     try:
-        return subprocess.run(args, **kwargs)
-    except subprocess.TimeoutExpired as exc:
-        raise TimeoutError(f"agy timed out after {timeout}s") from exc
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if liveness_probe is None or not liveness_probe():
+                    raise TimeoutError(f"agy timed out after {timeout}s")
+                deadline = time.monotonic() + stall_grace_seconds
+                remaining = stall_grace_seconds
+            try:
+                stdout, stderr = proc.communicate(timeout=min(1.0, remaining))
+                return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                continue
+    except TimeoutError:
+        proc.kill()
+        proc.communicate()
+        raise
 
 
 def _run_with_pty(
@@ -493,11 +520,13 @@ def _run_with_pty(
     workdir: Optional[str],
     timeout: float,
     env: Optional[dict[str, str]] = None,
+    liveness_probe: Callable[[], bool] | None = None,
+    stall_grace_seconds: float = 60.0,
 ) -> tuple[str, int]:
     """Run agy attached to a fresh pty so it believes stdout is a terminal."""
     if sys.platform == "win32":
-        return _run_with_conpty(args, workdir, timeout, env)
-    return _run_with_posix_pty(args, workdir, timeout, env)
+        return _run_with_conpty(args, workdir, timeout, env, liveness_probe, stall_grace_seconds)
+    return _run_with_posix_pty(args, workdir, timeout, env, liveness_probe, stall_grace_seconds)
 
 
 def _run_with_conpty(
@@ -505,6 +534,8 @@ def _run_with_conpty(
     workdir: Optional[str],
     timeout: float,
     env: Optional[dict[str, str]] = None,
+    liveness_probe: Callable[[], bool] | None = None,
+    stall_grace_seconds: float = 60.0,
 ) -> tuple[str, int]:
     try:
         from winpty import PtyProcess  # type: ignore
@@ -523,7 +554,10 @@ def _run_with_conpty(
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"agy timed out after {timeout}s")
+                if liveness_probe is None or not liveness_probe():
+                    raise TimeoutError(f"agy timed out after {timeout}s")
+                deadline = time.monotonic() + stall_grace_seconds
+                remaining = stall_grace_seconds
             fileobj = getattr(proc, "fileobj", None)
             if fileobj is not None:
                 fileobj.settimeout(min(1.0, remaining))
@@ -563,6 +597,8 @@ def _run_with_posix_pty(
     workdir: Optional[str],
     timeout: float,
     env: Optional[dict[str, str]] = None,
+    liveness_probe: Callable[[], bool] | None = None,
+    stall_grace_seconds: float = 60.0,
 ) -> tuple[str, int]:
     import pty
 
@@ -586,8 +622,11 @@ def _run_with_posix_pty(
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                proc.kill()
-                raise TimeoutError(f"agy timed out after {timeout}s")
+                if liveness_probe is None or not liveness_probe():
+                    proc.kill()
+                    raise TimeoutError(f"agy timed out after {timeout}s")
+                deadline = time.monotonic() + stall_grace_seconds
+                remaining = stall_grace_seconds
             ready, _, _ = select.select([master], [], [], min(1.0, remaining))
             if ready:
                 try:
