@@ -16,8 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 # Windows ConPTY fallback for the agy empty-output bug (#76)
 winpty = ["pywinpty>=2.0"]
-# Local smoke tests
-dev = ["pytest>=8.0"]
+# Local smoke tests and linting
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.16,<0.17",
+]
 
 [project.scripts]
 codex-agy-bridge = "codex_agy_bridge.__main__:main"
@@ -35,3 +38,9 @@ codex_agy_bridge = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9"]
