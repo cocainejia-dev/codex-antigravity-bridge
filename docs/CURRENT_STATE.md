@@ -8,8 +8,8 @@
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
 - `CURRENT_PHASE`: `PHASE 11.2R / CANONICAL RUNTIME CUTOVER`.
-- `CURRENT_TASK`: `FRESH_CLIENT_MCP_RUNTIME_ACCEPTANCE_PENDING`.
-- `STATE`: `WAITING_FOR_FRESH_CLIENT_RUNTIME_ACCEPTANCE`.
+- `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
+- `STATE`: `WAITING_FOR_USER_DIRECTION`.
 - `LAST_VERIFIED_COMMIT`: `3cded09512ade486387d6eb251f31c2d8f393491` (R2).
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
@@ -17,8 +17,8 @@
 - `CANONICAL_REPOSITORY_STATUS`: PASS.
 - `CANONICAL_RUNTIME_PROVENANCE_STATIC`: PASS; the repository-local `.venv`
   resolves all four bridge modules under the canonical source root.
-- `FRESH_CLIENT_RUNTIME_ACCEPTANCE`: PENDING.
-- `MCP_RUNTIME_CUTOVER`: `PENDING_FRESH_CLIENT`; target identity is
+- `FRESH_CLIENT_RUNTIME_ACCEPTANCE`: PASS.
+- `MCP_RUNTIME_CUTOVER`: `PASS`; target identity is
   `codex-agy-vnext`.
 - `READY_FOR_R3`: NO.
 
@@ -32,10 +32,11 @@
 ## Release Blockers and Deferred Work
 
 - Ruff remains `DEFERRED_EXISTING_ENVIRONMENT_BLOCKER`.
-- Fresh-client runtime acceptance remains pending.
-- MCP runtime cutover remains `PENDING_FRESH_CLIENT`.
-- R3 reproducible verification tooling is frozen until fresh-client acceptance.
-- `NEXT_SAFE_ACTION`: `FRESH_CODEX_RUNTIME_ACCEPTANCE`.
+- Fresh-client runtime acceptance: PASS (fresh controller smoke and one
+  disposable durable async acceptance).
+- MCP runtime cutover: PASS.
+- R3 reproducible verification tooling remains frozen pending user direction.
+- `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
 
 ## Verification
 

@@ -8,13 +8,13 @@
 - Last verified commit: `3cded09512ade486387d6eb251f31c2d8f393491`.
 - Canonical repository status: PASS.
 - Static canonical runtime provenance: PASS.
-- Fresh-client runtime acceptance: PENDING.
-- MCP runtime cutover: PENDING_FRESH_CLIENT.
-- Current state: WAITING_FOR_FRESH_CLIENT_RUNTIME_ACCEPTANCE.
-- Current task: FRESH_CLIENT_MCP_RUNTIME_ACCEPTANCE_PENDING.
-- Current release blockers: RUFF deferred; fresh-client acceptance pending;
-  MCP runtime cutover pending.
-- Next safe action: FRESH_CODEX_RUNTIME_ACCEPTANCE.
+- Fresh-client runtime acceptance: PASS.
+- MCP runtime cutover: PASS.
+- Current state: WAITING_FOR_USER_DIRECTION.
+- Current task: WAITING_FOR_USER_DIRECTION.
+- Current release blockers: RUFF deferred; R3 remains frozen pending user
+  direction.
+- Next safe action: WAIT_FOR_USER_DIRECTION.
 - READY_FOR_R3: NO.
 
 R3 reproducible verification tooling must not start before fresh-client
