@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project": "codex-agy-supervised-bridge",
+  "repo_relative_identity": "codex-antigravity-vnext",
+  "phase": "11.2R",
+  "task": "REPOSITORY_HANDOFF_CONSOLIDATION",
+  "state": "WAITING_FOR_USER_DIRECTION",
+  "current_head": "55dc397",
+  "last_verified_commit": "3cded09512ade486387d6eb251f31c2d8f393491",
+  "last_safe_commit": "55dc397",
+  "current_contract": "R1 PASS; W1 PASS; R2 PASS; no automatic R3 transition",
+  "allowed_paths": ["AGENTS.md", "docs/**", ".recovery/**", "scripts/**", ".gitignore"],
+  "verification_commands": ["powershell -ExecutionPolicy Bypass -File .\\scripts\\verify.ps1"],
+  "known_blockers": ["RUFF=DEFERRED_EXISTING_ENVIRONMENT_BLOCKER"],
+  "next_recommended_task": "R3_REPRODUCIBLE_VERIFICATION_TOOLING",
+  "machine_local_runtime_hints": {
+    "machine_local_hint": true,
+    "discovery": "Run scripts/handoff-status.ps1; inspect durable jobs without copying runtime databases",
+    "runtime_schema": "durable AGY job records are non-portable evidence"
+  },
+  "updated_at": "2026-08-20"
+}

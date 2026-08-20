@@ -11,3 +11,10 @@ build/
 node_modules/
 .worktrees/
 .codegraph/
+runtime/
+*.sqlite3
+*.db
+logs/
+tmp/
+worktrees/
+secrets/
