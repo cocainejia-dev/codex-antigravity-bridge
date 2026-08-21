@@ -10,7 +10,7 @@
 - `CURRENT_PHASE`: `PHASE 11.3 / CLEAN-ROOM E2E ACCEPTANCE`.
 - `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
 - `STATE`: `WAITING_FOR_USER_DIRECTION`.
-- `LAST_VERIFIED_COMMIT`: `95dd6e7` (clean-room provenance harness).
+- `LAST_VERIFIED_COMMIT`: `156e022` (PowerShell 5-compatible provenance harness).
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 source provenance: PASS.
