@@ -16,14 +16,31 @@ $isCleanRoomValid = $false
 if (Test-Path -LiteralPath $identityPath) {
     try {
         $identity = Get-Content -LiteralPath $identityPath -Encoding UTF8 -Raw | ConvertFrom-Json
+        $expectedVnextKey = "D:\" + [char]0x8F6F + [char]0x4EF6 + [char]0x5F00 + [char]0x53D1 + "\codex-antigravity-vnext"
+        $expectedBridgeKey = "D:\" + [char]0x8F6F + [char]0x4EF6 + [char]0x5F00 + [char]0x53D1 + "\codex-antigravity-bridge"
+
+        $foundVnext = $false
+        $foundBridge = $false
+        if ($identity.legacy_repository_roles) {
+            foreach ($prop in $identity.legacy_repository_roles.PSObject.Properties) {
+                $name = [string]$prop.Name
+                $val = [string]$prop.Value
+                if ([string]::Equals($name, $expectedVnextKey, [System.StringComparison]::OrdinalIgnoreCase) -and $val -eq 'PRE_MIGRATION_REFERENCE_ONLY') {
+                    $foundVnext = $true
+                }
+                if ([string]::Equals($name, $expectedBridgeKey, [System.StringComparison]::OrdinalIgnoreCase) -and $val -eq 'LEGACY_REFERENCE_ONLY') {
+                    $foundBridge = $true
+                }
+            }
+        }
+
         $baseIdentityValid = (
             $identity.canonical_repository -eq $true -and
             $identity.repository_role -eq 'authoritative' -and
             $identity.project_id -eq 'codex-agy-supervised-bridge' -and
             $identity.active_mcp_identity -eq 'codex-agy-vnext' -and
-            $identity.legacy_repository_roles -ne $null -and
-            $identity.legacy_repository_roles.PSObject.Properties['D:\软件开发\codex-antigravity-vnext'].Value -eq 'PRE_MIGRATION_REFERENCE_ONLY' -and
-            $identity.legacy_repository_roles.PSObject.Properties['D:\软件开发\codex-antigravity-bridge'].Value -eq 'LEGACY_REFERENCE_ONLY'
+            $foundVnext -and
+            $foundBridge
         )
         $isCanonicalMatch = (
             $baseIdentityValid -and
