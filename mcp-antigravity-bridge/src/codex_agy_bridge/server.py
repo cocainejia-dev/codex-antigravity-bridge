@@ -316,8 +316,9 @@ def run_start(
     record = manager.run_start(
         task,
         idempotency_key=idempotency_key or None,
+        worker_identity={"worker_type": "queued", "type": "queued"},
         run_id=run_id or None,
-        auto_spawn=auto_spawn,
+        auto_spawn=False,
         worktree=worktree or None,
         repo=repo or None,
         base_head=base_head or None,

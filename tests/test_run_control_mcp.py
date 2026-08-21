@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
+
 import pytest
 
 # Ensure package import from mcp-antigravity-bridge/src
@@ -16,18 +16,11 @@ SRC = Path(__file__).resolve().parents[1] / "mcp-antigravity-bridge" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from codex_agy_bridge.contracts import (
-    AutoCommitPolicy,
-    RiskClass,
-    RunRecord,
-    RunState,
-    TaskContract,
-)
+from codex_agy_bridge.contracts import RunState
 from codex_agy_bridge.run_control import (
     CredentialSecurityError,
-    DurableRunManager,
     DuplicateRunError,
-    RunNotFoundError,
+    DurableRunManager,
     RunNotTerminalError,
 )
 from codex_agy_bridge.server import (
@@ -154,6 +147,25 @@ def test_run_start_persists_created_run(tmp_path: Path) -> None:
     assert record.state == RunState.CREATED
 
 
+def test_run_start_without_callback_does_not_claim_in_process_worker(tmp_path: Path) -> None:
+    """MCP-created runs remain non-worker-owned across a new manager instance."""
+    db_file = tmp_path / "vnext_no_callback.sqlite3"
+    task = _sample_task_dict(task_id="task-no-callback-ownership")
+
+    start_data = json.loads(run_start(db_path=str(db_file), task=task, run_id="run-no-callback-ownership"))
+    assert start_data["state"] == "CREATED"
+
+    manager = DurableRunManager(db_file)
+    identity = manager.store.get_worker_identity("run-no-callback-ownership")
+    assert identity is not None
+    assert identity["worker_type"] == "queued"
+    assert identity["type"] == "queued"
+
+    observed = json.loads(run_observe(db_path=str(db_file), run_id="run-no-callback-ownership"))
+    assert observed["state"] == "CREATED"
+    assert observed["recovery_state"] is None
+
+
 def test_run_start_accepts_json_string_task(tmp_path: Path) -> None:
     """Verify run_start accepts task as a serialized JSON string."""
     db_file = tmp_path / "vnext_json_str.sqlite3"
@@ -203,15 +215,15 @@ def test_run_status_and_observe_shape(tmp_path: Path) -> None:
     assert status_data["state"] == "CREATED"
     assert status_data["task_id"] == "task-observe-01"
 
-    # run_observe on orphaned in-process run correctly identifies absent thread and exposes recovery state
+    # run_observe on a queued MCP-created run does not claim a missing callback worker
     observe_json = run_observe(db_path=str(db_file), run_id=run_id)
     obs_data = json.loads(observe_json)
     assert obs_data["run_id"] == run_id
-    assert obs_data["state"] == "INTERRUPTED"
-    assert obs_data["recovery_state"] == "RECOVERY_READY"
+    assert obs_data["state"] == "CREATED"
+    assert obs_data["recovery_state"] is None
     assert obs_data["is_terminal"] is False
-    assert obs_data["is_alive"] is False
-    assert obs_data["is_stale"] is True
+    assert obs_data["is_alive"] is True
+    assert obs_data["is_stale"] is False
     assert "record" in obs_data
     assert obs_data["record"]["run_id"] == run_id
 
@@ -324,7 +336,7 @@ def test_fastmcp_call_tool_dispatch(tmp_path: Path) -> None:
 
     async def _run_async_dispatch() -> None:
         # 1. run_start via call_tool
-        res_start, out_start = await mcp.call_tool(
+        res_start, _out_start = await mcp.call_tool(
             "run_start",
             {"db_path": db_file, "task": task, "run_id": "run-disp-01"},
         )

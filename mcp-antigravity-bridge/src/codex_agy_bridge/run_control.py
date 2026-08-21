@@ -131,6 +131,8 @@ def _is_in_process_worker(record: RunRecord, worker_identity: dict[str, Any] | N
         wtype = str(worker_identity.get("worker_type") or worker_identity.get("type") or "").strip().lower()
         if wtype in ("process", "subprocess", "external", "supervised_process"):
             return False
+        if wtype == "queued":
+            return False
         if wtype in ("in_process", "thread", "callback", "in_process_callback", "in_process_thread"):
             return True
     if record.pid is not None and record.pid != os.getpid():
