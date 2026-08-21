@@ -1,3 +1,8 @@
+[CmdletBinding()]
+param(
+    [switch]$AllowCleanRoom
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -5,33 +10,51 @@ $identityPath = Join-Path $repo '.recovery\repository-identity.json'
 $expectedPython = Join-Path $repo '.venv\Scripts\python.exe'
 $sourceRoot = Join-Path $repo 'mcp-antigravity-bridge\src'
 $identity = $null
-$identityValid = $false
+$isCanonicalMatch = $false
+$isCleanRoomValid = $false
 
 if (Test-Path -LiteralPath $identityPath) {
     try {
         $identity = Get-Content -LiteralPath $identityPath -Encoding UTF8 -Raw | ConvertFrom-Json
-        $identityValid = (
+        $baseIdentityValid = (
             $identity.canonical_repository -eq $true -and
             $identity.repository_role -eq 'authoritative' -and
+            $identity.project_id -eq 'codex-agy-supervised-bridge' -and
+            $identity.active_mcp_identity -eq 'codex-agy-vnext' -and
+            $identity.legacy_repository_roles -ne $null -and
+            $identity.legacy_repository_roles.PSObject.Properties['D:\软件开发\codex-antigravity-vnext'].Value -eq 'PRE_MIGRATION_REFERENCE_ONLY' -and
+            $identity.legacy_repository_roles.PSObject.Properties['D:\软件开发\codex-antigravity-bridge'].Value -eq 'LEGACY_REFERENCE_ONLY'
+        )
+        $isCanonicalMatch = (
+            $baseIdentityValid -and
             [string]::Equals(
                 $repo,
                 [string]$identity.machine_local_canonical_path,
                 [System.StringComparison]::OrdinalIgnoreCase
             )
         )
+        $isCleanRoomValid = $baseIdentityValid
     } catch {
-        $identityValid = $false
+        $isCanonicalMatch = $false
+        $isCleanRoomValid = $false
     }
 }
 
 Write-Output "REPO_ROOT=$repo"
 Write-Output "IDENTITY_PATH=$identityPath"
-$identityResult = if ($identityValid) { 'YES' } else { 'NO' }
+$identityResult = if ($isCanonicalMatch) { 'YES' } else { 'NO' }
 Write-Output "THIS_IS_CANONICAL_REPO=$identityResult"
+if ($AllowCleanRoom) {
+    Write-Output 'CLEANROOM_MODE=YES'
+    $targetIdentityResult = if ($isCleanRoomValid) { 'PASS' } else { 'FAIL' }
+    Write-Output "TARGET_REPOSITORY_IDENTITY=$targetIdentityResult"
+}
 Write-Output "EXPECTED_INTERPRETER=$expectedPython"
 Write-Output "EXPECTED_SOURCE_ROOT=$sourceRoot"
 
-if (-not $identityValid) {
+$effectiveIdentityValid = if ($AllowCleanRoom) { $isCleanRoomValid } else { $isCanonicalMatch }
+
+if (-not $effectiveIdentityValid) {
     Write-Output 'PROVENANCE_STATUS=FAIL'
     Write-Output 'PROVENANCE_ERROR=CANONICAL_IDENTITY_INVALID'
     exit 1
