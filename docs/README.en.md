@@ -1,7 +1,7 @@
 # Documentation Index
 
 This is the unified documentation entry point. Project overviews, progress
-records, the verification demo, and internal design history have separate homes
+records, release hardening, the verification demo, and internal design history have separate homes
 so that user guidance is not mixed with implementation records.
 
 > [!WARNING]
@@ -16,24 +16,39 @@ so that user guidance is not mixed with implementation records.
 | --- | --- |
 | Chinese overview, installation, and mode selection | [README.zh-CN.md](../README.zh-CN.md) |
 | English overview, installation, and mode selection | [Project overview](../README.md) |
+| Release-hardening checklist | [RELEASE_HARDENING.md](RELEASE_HARDENING.md) |
+| Architecture and recovery | [ARCHITECTURE.md](ARCHITECTURE.md) · [RECOVERY.md](RECOVERY.md) |
+| Release plan and phase status | [RELEASE_PLAN.md](RELEASE_PLAN.md) |
 | Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | Installation, proxy, MCP tools, and troubleshooting | [English quick start](../README.md#quick-start) · [中文快速开始](../README.zh-CN.md#quick-start) |
 | AGY collaboration rules and safety boundaries | [agy-supervisor skill](../skills/agy-supervisor/SKILL.md) |
 | Collaboration demo, dry-run, and verification | [Demo](demo.md) |
-| Security reporting | [SECURITY.md](../SECURITY.md) |
+| Security reporting and trust boundaries | [SECURITY.md](../SECURITY.md) |
 | Research notes | [research/codex-antigravity-cases.md](../research/codex-antigravity-cases.md) |
 
 ## Technical Documentation Layout
 
-### User documentation
+### User documentation and release hardening
 
 The root `README.md` and `README.zh-CN.md` are the single user entry points for
 installation, proxy setup, MCP tools, and security boundaries. `docs/demo.md`
 contains the real MCP smoke test, collaboration dry-run, and human review steps.
 
+`docs/RELEASE_HARDENING.md` records runtime-state hygiene, source-provenance
+checks, provider error boundaries, and the explicit Phase 11.5 boundary.
+
 `mcp-antigravity-bridge/README.md` only contains package installation and
 development commands for source contributors and package metadata.
+
+### Architecture and recovery
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) defines controller-owned contracts,
+  verification, and commits around isolated `agy` worktrees.
+- [`RECOVERY.md`](RECOVERY.md) defines read-only runtime-state discovery and
+  fail-closed handling for unknown or incompatible state.
+- Provider authentication, rate limits, network failures, and ConPTY support
+  are external infrastructure boundaries, not silent bridge fallbacks.
 
 ### Design and execution history
 

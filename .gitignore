@@ -1,4 +1,4 @@
-﻿.venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -18,3 +18,8 @@ logs/
 tmp/
 worktrees/
 secrets/
+*.pid
+.coverage
+.coverage.*
+.mypy_cache/
+.ruff_cache/

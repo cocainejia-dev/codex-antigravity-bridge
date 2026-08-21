@@ -226,6 +226,27 @@ codex mcp list
 
 Windows 手动配置 MCP 时，请把 `command` 写成真实 Python 可执行文件的绝对路径，不要使用可能指向 Microsoft Store shim 的 `python` 命令。官方安装脚本会自动解析并写入该路径。
 
+### 运行时状态、恢复与诊断
+
+运行时 SQLite、日志、PID、心跳、覆盖率缓存和临时 worktree 都是本机动态
+状态，已被 `.gitignore` 排除，不得提交或公开。重试中断任务前，先只读运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\handoff-status.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
+```
+
+仓库身份支持可迁移 clone，记录的本机路径只是诊断提示。来源校验仍要求使用
+仓库自己的解释器，并确认桥接模块来自当前源码树；不匹配时会 fail-closed。未知
+运行状态、缺少 `agy`、登录失败、限流、网络/代理错误和 Windows ConPTY 问题会被
+按外部环境或恢复条件报告，不会静默回退到旧仓库。
+
+## Release status
+
+`0.1.0` 已完成稳定化和 clean-room 验收，当前处于 Phase 11.4 release
+hardening。CI、构建产物、包索引发布和 release candidate 标记留到 Phase 11.5，
+当前尚未发布到包索引。详见 [发布加固清单](docs/RELEASE_HARDENING.md)。
+
 <a id="tools"></a>
 
 ## 🧰 六个工具

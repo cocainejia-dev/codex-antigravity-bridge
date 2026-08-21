@@ -93,6 +93,24 @@ for a proxy. An explicit setup proxy can be passed as
 `--no-proxy` to remove the managed proxy entries. URLs containing credentials
 are rejected so they cannot be copied into Codex configuration.
 
+### Runtime state, recovery, and diagnostics
+
+Runtime databases, logs, PIDs, heartbeats, coverage caches, and temporary
+worktrees are machine-local and excluded from Git. They may contain prompts or
+workspace metadata and must not be published. Use these read-only diagnostics
+before retrying an interrupted task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\handoff-status.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
+```
+
+The repository identity is portable; its recorded local path is only a hint.
+Provenance still fails closed unless the repository-local interpreter is used
+and bridge modules resolve beneath the current source tree. Unknown runtime
+state, missing `agy`, authentication failures, rate limits, network/proxy
+errors, and Windows ConPTY problems are reported without silent legacy fallback.
+
 ## Runtime Modes
 
 | Mode | Entry point | Worktree | Best for |
@@ -164,6 +182,13 @@ means only that the process exited successfully; it is not acceptance proof.
 
 See [SECURITY.md](SECURITY.md) for reporting guidance and [docs/demo.md](docs/demo.md)
 for a reproducible dry-run and live-demo checklist.
+
+## Release status
+
+Version `0.1.0` has completed stabilization and clean-room acceptance and is in
+Phase 11.4 release hardening. CI, package builds, package-index publication,
+and release-candidate tagging are deferred to Phase 11.5; this is not a
+published package yet. See [docs/RELEASE_HARDENING.md](docs/RELEASE_HARDENING.md).
 
 ## Development
 

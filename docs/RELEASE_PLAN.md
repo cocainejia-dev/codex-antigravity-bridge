@@ -40,8 +40,13 @@ project status, not a live runtime process list or durable job database state.
 
 ## Subsequent phases
 
-- Phase 11.4: release hardening.
+- Phase 11.4: release hardening: PASS. Public documentation, runtime-state
+  hygiene, portable identity diagnostics, fail-closed provenance guidance,
+  security boundaries, and release metadata are complete.
 - Phase 11.5: CI, packaging, and release candidate.
 - Phase 11.6: GitHub publication.
+
+Phase 11.4 is complete. Do not begin Phase 11.5 without explicit user
+direction; the current state is `WAITING_FOR_USER_DIRECTION`.
 
 This file records confirmed status and next steps, not chat history.

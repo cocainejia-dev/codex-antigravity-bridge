@@ -61,6 +61,10 @@ Write-Output "REPO_ROOT=$repo"
 Write-Output "IDENTITY_PATH=$identityPath"
 $identityResult = if ($isCanonicalMatch) { 'YES' } else { 'NO' }
 Write-Output "THIS_IS_CANONICAL_REPO=$identityResult"
+if (-not $isCanonicalMatch -and $isCleanRoomValid) {
+    Write-Output 'PORTABLE_REPOSITORY_IDENTITY=PASS'
+    Write-Output 'MACHINE_LOCAL_PATH_MATCH=NO_DIAGNOSTIC_HINT_ONLY'
+}
 if ($AllowCleanRoom) {
     Write-Output 'CLEANROOM_MODE=YES'
     $targetIdentityResult = if ($isCleanRoomValid) { 'PASS' } else { 'FAIL' }
@@ -69,7 +73,7 @@ if ($AllowCleanRoom) {
 Write-Output "EXPECTED_INTERPRETER=$expectedPython"
 Write-Output "EXPECTED_SOURCE_ROOT=$sourceRoot"
 
-$effectiveIdentityValid = if ($AllowCleanRoom) { $isCleanRoomValid } else { $isCanonicalMatch }
+$effectiveIdentityValid = $isCleanRoomValid
 
 if (-not $effectiveIdentityValid) {
     Write-Output 'PROVENANCE_STATUS=FAIL'
