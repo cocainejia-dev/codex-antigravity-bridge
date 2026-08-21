@@ -10,7 +10,7 @@
   "task": "WAITING_FOR_USER_DIRECTION",
   "state": "WAITING_FOR_USER_DIRECTION",
   "runtime_resolved_head": "DISCOVER_AT_STARTUP",
-  "last_verified_commit": "156e022",
+  "last_verified_commit": "b3b5fb3",
   "baseline_commit": "156e022",
   "r1_status": "PASS",
   "w1_status": "PASS",
