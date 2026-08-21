@@ -7,10 +7,10 @@
 - `RUNTIME_RESOLVED_HEAD`: discover at startup; do not write the containing
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
-- `CURRENT_PHASE`: `PHASE 11.2R / R3 REPRODUCIBLE VERIFICATION TOOLING`.
+- `CURRENT_PHASE`: `PHASE 11.3 / CLEAN-ROOM E2E ACCEPTANCE`.
 - `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
 - `STATE`: `WAITING_FOR_USER_DIRECTION`.
-- `LAST_VERIFIED_COMMIT`: `414cd43` (R3 tooling).
+- `LAST_VERIFIED_COMMIT`: `95dd6e7` (clean-room provenance harness).
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 source provenance: PASS.
@@ -31,6 +31,17 @@
 - `GLOBAL_TOOLING_REQUIRED`: NO.
 - `GLOBAL_PYTHON_ENV_MUTATED`: NO.
 - `READY_FOR_R3`: YES.
+- `PHASE11_3_CLEANROOM_E2E`: PASS.
+- `CLEANROOM_ENV_INSTALL`: PASS.
+- `CLEANROOM_VERIFY_BASELINE`: PASS (`281 passed, 1 warning`).
+- `THREE_CONSECUTIVE_ROUNDS`: PASS; disposable acceptance commits remained in
+  the clean-room branch and were not merged to `main`.
+- `COLD_START_RECOVERY`: PASS.
+- `CONVERSATION_CONTEXT_REQUIRED`: NO.
+- `DUPLICATE_WORKER`: 0.
+- `EXACTLY_ONE_HARVEST_PER_ROUND`: PASS.
+- `FINAL_FULL_VERIFY`: PASS in the clean-room (`284 passed, 1 warning`).
+- `READY_FOR_RELEASE_HARDENING`: YES.
 
 ## Repository Roles
 
@@ -42,6 +53,7 @@
 ## Release Blockers and Deferred Work
 
 - R3 reproducible verification tooling: PASS.
+- Phase 11.3 clean-room E2E acceptance: PASS.
 - Fresh-client runtime acceptance: PASS (fresh controller smoke and one
   disposable durable async acceptance).
 - MCP runtime cutover: PASS.
