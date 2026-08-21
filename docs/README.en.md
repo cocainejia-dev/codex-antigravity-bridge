@@ -19,6 +19,8 @@ so that user guidance is not mixed with implementation records.
 | Release-hardening checklist | [RELEASE_HARDENING.md](RELEASE_HARDENING.md) |
 | Architecture and recovery | [ARCHITECTURE.md](ARCHITECTURE.md) · [RECOVERY.md](RECOVERY.md) |
 | Release plan and phase status | [RELEASE_PLAN.md](RELEASE_PLAN.md) |
+| Full new-Codex takeover prompt | [CODEX_TAKEOVER_PROMPT.md](CODEX_TAKEOVER_PROMPT.md) |
+| Short takeover bootstrap | [CODEX_TAKEOVER_BOOTSTRAP.txt](CODEX_TAKEOVER_BOOTSTRAP.txt) |
 | Chinese project progress | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | Installation, proxy, MCP tools, and troubleshooting | [English quick start](../README.md#quick-start) · [中文快速开始](../README.zh-CN.md#quick-start) |

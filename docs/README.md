@@ -15,6 +15,8 @@
 | 控制器架构与权限边界 | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 恢复协议与状态发现 | [RECOVERY.md](RECOVERY.md) |
 | 发布计划与阶段状态 | [RELEASE_PLAN.md](RELEASE_PLAN.md) |
+| 新 Codex 接管完整提示词 | [CODEX_TAKEOVER_PROMPT.md](CODEX_TAKEOVER_PROMPT.md) |
+| 新 Codex 接管短启动提示 | [CODEX_TAKEOVER_BOOTSTRAP.txt](CODEX_TAKEOVER_BOOTSTRAP.txt) |
 | 中文项目进度 | [PROGRESS.md](../PROGRESS.md) |
 | English project progress | [PROGRESS.en.md](../PROGRESS.en.md) |
 | 安装、代理、MCP 工具和排错 | [中文首页快速开始](../README.zh-CN.md#quick-start) · [English quick start](../README.md#quick-start) |

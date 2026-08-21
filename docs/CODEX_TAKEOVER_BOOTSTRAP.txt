@@ -1,0 +1,9 @@
+Canonical repo (machine-local): D:\软件开发\git仓库\桥接git仓库
+1. Locate the real Git root; do not create a second repository.
+2. Read AGENTS.md, then read docs/CODEX_TAKEOVER_PROMPT.md in full.
+3. Follow docs/RECOVERY.md cold-start checks read-only.
+4. Verify identity, HEAD, status, handoff-status, and runtime-provenance.
+5. Do not rely on old chat, provider, relay, credentials, or old repositories.
+6. Do not start Phase 11.5, workers, implementation, GitHub, push, or tags.
+7. Print the required takeover report from the full prompt.
+8. Stop at WAITING_FOR_USER_DIRECTION and await user direction.
