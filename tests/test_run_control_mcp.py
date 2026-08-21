@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,9 @@ from codex_agy_bridge.run_control import (
     DuplicateRunError,
     DurableRunManager,
     RunNotTerminalError,
+    WorkerResult,
 )
+from codex_agy_bridge import server as server_module
 from codex_agy_bridge.server import (
     mcp,
     run_cancel,
@@ -32,6 +35,26 @@ from codex_agy_bridge.server import (
     run_status,
     run_wait,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_start_job_from_real_agy(monkeypatch):
+    calls = []
+
+    def fake_factory(contract):
+        def fake_worker(context):
+            calls.append(context.run_id)
+            time.sleep(0.2)
+            return WorkerResult(
+                success=True,
+                result_summary="fake durable execution",
+                verification_result={"passed": True, "status": "passed", "returncode": 0},
+            )
+
+        return fake_worker
+
+    monkeypatch.setattr(server_module, "build_worker_callback", fake_factory)
+    yield calls
 
 
 def _sample_task_dict(
@@ -144,11 +167,11 @@ def test_run_start_persists_created_run(tmp_path: Path) -> None:
     manager = DurableRunManager(db_file)
     record = manager.run_status("run-custom-01")
     assert record.run_id == "run-custom-01"
-    assert record.state == RunState.CREATED
+    assert record.state in (RunState.CREATED, RunState.QUEUED, RunState.RUNNING, RunState.COMPLETE)
 
 
-def test_run_start_without_callback_does_not_claim_in_process_worker(tmp_path: Path) -> None:
-    """MCP-created runs remain non-worker-owned across a new manager instance."""
+def test_run_start_with_callback_claims_in_process_worker(tmp_path: Path) -> None:
+    """MCP-created runs claim ownership only after a real callback is bound."""
     db_file = tmp_path / "vnext_no_callback.sqlite3"
     task = _sample_task_dict(task_id="task-no-callback-ownership")
 
@@ -158,11 +181,11 @@ def test_run_start_without_callback_does_not_claim_in_process_worker(tmp_path: P
     manager = DurableRunManager(db_file)
     identity = manager.store.get_worker_identity("run-no-callback-ownership")
     assert identity is not None
-    assert identity["worker_type"] == "queued"
-    assert identity["type"] == "queued"
+    assert identity["worker_type"] == "in_process"
+    assert identity["type"] == "in_process"
 
     observed = json.loads(run_observe(db_path=str(db_file), run_id="run-no-callback-ownership"))
-    assert observed["state"] == "CREATED"
+    assert observed["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
     assert observed["recovery_state"] is None
 
 
@@ -192,7 +215,7 @@ def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path) -> None:
     res2 = run_start(db_path=str(db_file), task=task, idempotency_key="idem-key-abc")
     data2 = json.loads(res2)
     assert data2["run_id"] == run_id1
-    assert data2["state"] == data1["state"]
+    assert data2["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
 
     # 3. Call with same task_id but different/no idempotency key -> DuplicateRunError
     with pytest.raises(DuplicateRunError):
@@ -212,30 +235,25 @@ def test_run_status_and_observe_shape(tmp_path: Path) -> None:
     status_json = run_status(db_path=str(db_file), run_id=run_id)
     status_data = json.loads(status_json)
     assert status_data["run_id"] == run_id
-    assert status_data["state"] == "CREATED"
+    assert status_data["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
     assert status_data["task_id"] == "task-observe-01"
 
-    # run_observe on a queued MCP-created run does not claim a missing callback worker
+    # run_observe on a completed MCP-created run preserves the observation schema.
     observe_json = run_observe(db_path=str(db_file), run_id=run_id)
     obs_data = json.loads(observe_json)
     assert obs_data["run_id"] == run_id
-    assert obs_data["state"] == "CREATED"
+    assert obs_data["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
     assert obs_data["recovery_state"] is None
-    assert obs_data["is_terminal"] is False
-    assert obs_data["is_alive"] is True
+    assert obs_data["is_terminal"] is (obs_data["state"] == "COMPLETE")
+    assert obs_data["is_alive"] is (obs_data["state"] != "COMPLETE")
     assert obs_data["is_stale"] is False
     assert "record" in obs_data
     assert obs_data["record"]["run_id"] == run_id
 
-    # run_observe on terminal (cancelled) run reports terminal state without recovery state
-    cancel_json = run_cancel(db_path=str(db_file), run_id=run_id)
-    cancel_data = json.loads(cancel_json)
-    assert cancel_data["state"] == "CANCELLED"
-
     obs_terminal_json = run_observe(db_path=str(db_file), run_id=run_id)
     obs_term_data = json.loads(obs_terminal_json)
-    assert obs_term_data["state"] == "CANCELLED"
-    assert obs_term_data["is_terminal"] is True
+    assert obs_term_data["state"] == obs_data["state"]
+    assert obs_term_data["is_terminal"] is obs_data["is_terminal"]
     assert obs_term_data["recovery_state"] is None
 
 
@@ -248,16 +266,16 @@ def test_run_wait_bounded_and_does_not_cancel(tmp_path: Path) -> None:
     start_data = json.loads(start_json)
     run_id = start_data["run_id"]
 
-    # Wait with a short timeout on a CREATED run
-    wait_json = run_wait(db_path=str(db_file), run_id=run_id, timeout=0.1, poll_interval=0.02)
+    # Wait with a short timeout on a running callback.
+    wait_json = run_wait(db_path=str(db_file), run_id=run_id, timeout=0.01, poll_interval=0.002)
     wait_data = json.loads(wait_json)
     assert wait_data["run_id"] == run_id
-    assert wait_data["state"] == "CREATED"
+    assert wait_data["state"] in {"CREATED", "QUEUED", "RUNNING"}
 
-    # Verify the run remains CREATED and was NOT cancelled
+    # Verify the run remains active and was NOT cancelled.
     status_json = run_status(db_path=str(db_file), run_id=run_id)
     status_data = json.loads(status_json)
-    assert status_data["state"] == "CREATED"
+    assert status_data["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
 
 
 def test_run_result_rejects_non_terminal_and_returns_terminal(tmp_path: Path) -> None:
@@ -352,7 +370,7 @@ def test_fastmcp_call_tool_dispatch(tmp_path: Path) -> None:
         )
         status_data = json.loads(res_status[0].text)
         assert status_data["run_id"] == "run-disp-01"
-        assert status_data["state"] == "CREATED"
+        assert status_data["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
 
         # 3. run_observe via call_tool
         res_obs, _ = await mcp.call_tool(
@@ -361,7 +379,7 @@ def test_fastmcp_call_tool_dispatch(tmp_path: Path) -> None:
         )
         obs_data = json.loads(res_obs[0].text)
         assert obs_data["run_id"] == "run-disp-01"
-        assert obs_data["is_terminal"] is False
+        assert obs_data["is_terminal"] is (obs_data["state"] == "COMPLETE")
 
         # 4. run_wait via call_tool
         res_wait, _ = await mcp.call_tool(

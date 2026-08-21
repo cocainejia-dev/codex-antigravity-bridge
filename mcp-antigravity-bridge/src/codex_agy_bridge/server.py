@@ -32,6 +32,7 @@ from .run_control import (
     RunNotTerminalError,
     WorkerResult,
 )
+from .worker_binding import build_worker_callback
 
 mcp = FastMCP(
     "codex-agy-bridge",
@@ -303,6 +304,37 @@ def run_start(
     Auto_spawn is false by default because MCP JSON cannot carry Python callbacks;
     execution wiring is internal.
     """
+    return _run_start_impl(
+        db_path=db_path,
+        task=task,
+        idempotency_key=idempotency_key,
+        run_id=run_id,
+        auto_spawn=auto_spawn,
+        worktree=worktree,
+        repo=repo,
+        base_head=base_head,
+        attempt=attempt,
+        repair_round=repair_round,
+    )
+
+
+def _run_start_impl(
+    db_path: str,
+    task: dict[str, Any],
+    idempotency_key: str | None = None,
+    run_id: str | None = None,
+    auto_spawn: bool = False,
+    worktree: str | None = None,
+    repo: str | None = None,
+    base_head: str | None = None,
+    attempt: int = 0,
+    repair_round: int = 0,
+    *,
+    worker_factory=None,
+) -> str:
+    """Internal run-start seam; callable values never enter the public MCP schema."""
+    if worker_factory is None:
+        worker_factory = build_worker_callback
     valid_db_path = _validate_db_path(db_path)
     if isinstance(task, str):
         try:
@@ -312,13 +344,15 @@ def run_start(
     if not isinstance(task, dict):
         raise ValueError("task must be a dictionary representing a TaskContract")
 
+    contract = TaskContract.from_dict(task)
+    worker = worker_factory(contract)
     manager = DurableRunManager(valid_db_path)
     record = manager.run_start(
-        task,
+        contract,
         idempotency_key=idempotency_key or None,
-        worker_identity={"worker_type": "queued", "type": "queued"},
+        worker=worker,
         run_id=run_id or None,
-        auto_spawn=False,
+        auto_spawn=True,
         worktree=worktree or None,
         repo=repo or None,
         base_head=base_head or None,

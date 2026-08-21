@@ -504,8 +504,8 @@ def test_run_not_found_errors(tmp_path: Path) -> None:
         manager.get_task_contract("nonexistent-run-id")
 
 
-def test_immediate_manager_recreation_interrupted_recovery_ready(tmp_path: Path) -> None:
-    """Verify immediate manager recreation on active in-process run marks it INTERRUPTED and RECOVERY_READY."""
+def test_manager_recreation_preserves_active_in_process_worker(tmp_path: Path) -> None:
+    """A new manager in the same process sees the existing active callback."""
     db_file = tmp_path / "recreation_interrupted.sqlite3"
     manager1 = DurableRunManager(db_file)
     contract = _create_sample_contract(task_id="task-recreation-01")
@@ -529,25 +529,39 @@ def test_immediate_manager_recreation_interrupted_recovery_ready(tmp_path: Path)
     assert obs1.recovery_state is None
     assert obs1.state in (RunState.RUNNING, RunState.QUEUED)
 
-    # Recreate manager instance (simulating restart / recreation where thread is absent but PID is alive)
+    # Recreate manager instance in the same Python process.
     manager2 = DurableRunManager(db_file)
 
-    # Observe immediately through manager2 without waiting for heartbeat timeout
+    # Observe immediately without waiting for heartbeat timeout.
     obs2 = manager2.run_observe(record.run_id)
     assert obs2.run_id == record.run_id
-    assert obs2.state == RunState.INTERRUPTED
-    assert obs2.recovery_state == RunState.RECOVERY_READY
-    assert obs2.is_alive is False
-    assert obs2.is_stale is True
+    assert obs2.state in (RunState.RUNNING, RunState.QUEUED)
+    assert obs2.recovery_state is None
+    assert obs2.is_alive is True
+    assert obs2.is_stale is False
     assert obs2.is_terminal is False
 
-    # Check that durable record in SQLite was updated to INTERRUPTED with same run_id retained
+    # Durable record remains active with the same run_id.
     persisted_status = manager2.run_status(record.run_id)
     assert persisted_status.run_id == record.run_id
-    assert persisted_status.state == RunState.INTERRUPTED
+    assert persisted_status.state in (RunState.RUNNING, RunState.QUEUED)
 
     # Unblock the background thread for clean teardown
     worker_hold.set()
+
+
+def test_missing_shared_worker_still_enters_recovery(tmp_path: Path) -> None:
+    """A persisted in-process run with no live local ownership remains recoverable."""
+    db_file = tmp_path / "missing_shared_worker.sqlite3"
+    manager = DurableRunManager(db_file)
+    contract = _create_sample_contract(task_id="task-missing-shared-worker")
+    record = manager.run_start(contract, auto_spawn=False)
+    manager.store.transition_run(record.run_id, expected_version=1, target_state=RunState.QUEUED)
+    manager.store.transition_run(record.run_id, expected_version=2, target_state=RunState.RUNNING)
+
+    obs = DurableRunManager(db_file).run_observe(record.run_id)
+    assert obs.state == RunState.INTERRUPTED
+    assert obs.recovery_state == RunState.RECOVERY_READY
 
 
 def test_external_process_observation_liveness_and_stale(tmp_path: Path) -> None:

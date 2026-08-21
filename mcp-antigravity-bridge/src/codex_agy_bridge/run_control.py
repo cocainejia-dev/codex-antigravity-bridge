@@ -629,12 +629,18 @@ class _ActiveExecution:
 class DurableRunManager:
     """Durable run controller managing persistence, execution, heartbeats, and observation."""
 
+    _process_active_executions: dict[str, dict[str, _ActiveExecution]] = {}
+    _process_active_locks: dict[str, threading.Lock] = {}
+    _process_registry_lock = threading.Lock()
+
     def __init__(self, db_path: str | Path) -> None:
         if db_path is None:
             raise ValueError("DurableRunManager requires an explicit caller-supplied db_path")
         self.store = DurableRunStore(db_path)
-        self._active_executions: dict[str, _ActiveExecution] = {}
-        self._active_lock = threading.Lock()
+        self._ownership_key = str(Path(db_path).expanduser().resolve()).casefold()
+        with self._process_registry_lock:
+            self._active_executions = self._process_active_executions.setdefault(self._ownership_key, {})
+            self._active_lock = self._process_active_locks.setdefault(self._ownership_key, threading.Lock())
 
     def run_start(
         self,
@@ -1163,9 +1169,19 @@ class DurableRunManager:
                 target_state=RunState.CANCELLED,
                 last_error=reason,
             )
-        except InvalidStateTransitionError:
+        except (InvalidStateTransitionError, ConcurrentModificationError):
             # If direct transition is blocked (e.g. from COMMITTING), observe current state
             latest = self.store.get_run(run_id)
+            if latest is not None and latest.state not in TERMINAL_STATES:
+                try:
+                    return self.store.transition_run(
+                        run_id,
+                        expected_version=latest.state_version,
+                        target_state=RunState.CANCELLED,
+                        last_error=reason,
+                    )
+                except (InvalidStateTransitionError, ConcurrentModificationError):
+                    latest = self.store.get_run(run_id)
             return latest if latest is not None else record
 
     def heartbeat(self, run_id: str) -> RunRecord:
