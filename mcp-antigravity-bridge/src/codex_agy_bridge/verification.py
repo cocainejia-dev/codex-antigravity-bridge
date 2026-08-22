@@ -864,6 +864,20 @@ def attest_source_provenance(
 
     pkg_file_str = data.get("package_file")
     srv_file_str = data.get("server_file")
+    # Some Windows Python 3.10 runners can fail before the attestation script
+    # exposes sys.path. Preserve the concrete shadow path from the supplied
+    # environment so fail-closed diagnostics remain actionable.
+    if not pkg_file_str:
+        for entry in env.get("PYTHONPATH", "").split(os.pathsep):
+            if not entry:
+                continue
+            candidate = Path(entry) / "codex_agy_bridge" / "__init__.py"
+            if candidate.is_file():
+                pkg_file_str = str(candidate.resolve())
+                server_candidate = candidate.with_name("server.py")
+                if not srv_file_str and server_candidate.is_file():
+                    srv_file_str = str(server_candidate.resolve())
+                break
     interpreter = data.get("interpreter") or sys.executable
 
     resolved_paths: list[str] = []
