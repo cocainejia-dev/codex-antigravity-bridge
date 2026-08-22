@@ -149,7 +149,7 @@ Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
 **Windows PowerShell**
 
 ```powershell
-git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
+git clone https://github.com/cocainejia-dev/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WhatIf
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -166,7 +166,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -ProxyUrl "http:/
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
+git clone https://github.com/cocainejia-dev/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
 WHAT_IF=1 sh scripts/install.sh
 sh scripts/install.sh

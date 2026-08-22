@@ -39,7 +39,7 @@ Prerequisites:
 ### Source install
 
 ```powershell
-git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
+git clone https://github.com/cocainejia-dev/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WhatIf
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 On macOS or Linux:
 
 ```bash
-git clone https://github.com/crazyzhang277/codex-antigravity-bridge.git
+git clone https://github.com/cocainejia-dev/codex-antigravity-bridge.git
 cd codex-antigravity-bridge
 WHAT_IF=1 sh scripts/install.sh
 sh scripts/install.sh
