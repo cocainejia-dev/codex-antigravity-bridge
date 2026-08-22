@@ -350,7 +350,11 @@ def test_interrupted_run_staged_recovery_and_resume(tmp_path: Path) -> None:
     assert resumed.run_id == record.run_id
     assert resumed.attempt == 1
 
-    final_rec = manager.run_wait(record.run_id, timeout=2.0)
+    deadline = time.monotonic() + 2.0
+    final_rec = manager.run_wait(record.run_id, timeout=max(0.01, deadline - time.monotonic()))
+    while final_rec.state not in {RunState.COMPLETE, RunState.FAILED, RunState.CANCELLED} and time.monotonic() < deadline:
+        time.sleep(0.01)
+        final_rec = manager.run_status(record.run_id)
     assert final_rec.state == RunState.COMPLETE
     assert final_rec.result_summary == "Resumed successfully"
 

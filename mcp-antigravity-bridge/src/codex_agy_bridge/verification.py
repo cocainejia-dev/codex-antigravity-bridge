@@ -799,16 +799,16 @@ def attest_source_provenance(
     """Execute cold subprocess attestation checking codex_agy_bridge module resolution against expected_root."""
     attestation_script = (
         "import json, sys, os\n"
-        "res = {'interpreter': sys.executable, 'cwd': os.getcwd()}\n"
+        "res = {'interpreter': sys.executable, 'cwd': os.getcwd(), 'package_file': None, 'server_file': None}\n"
         "try:\n"
         "    import codex_agy_bridge\n"
+        "    if hasattr(codex_agy_bridge, '__file__') and codex_agy_bridge.__file__:\n"
+        "        res['package_file'] = os.path.abspath(codex_agy_bridge.__file__)\n"
         "    import codex_agy_bridge.server\n"
-        "    res['package_file'] = os.path.abspath(codex_agy_bridge.__file__) if hasattr(codex_agy_bridge, '__file__') and codex_agy_bridge.__file__ else None\n"
-        "    res['server_file'] = os.path.abspath(codex_agy_bridge.server.__file__) if hasattr(codex_agy_bridge.server, '__file__') and codex_agy_bridge.server.__file__ else None\n"
+        "    if hasattr(codex_agy_bridge.server, '__file__') and codex_agy_bridge.server.__file__:\n"
+        "        res['server_file'] = os.path.abspath(codex_agy_bridge.server.__file__)\n"
         "    res['status'] = 'OK'\n"
         "except Exception as exc:\n"
-        "    res['package_file'] = None\n"
-        "    res['server_file'] = None\n"
         "    res['status'] = 'ERROR'\n"
         "    res['error'] = str(exc)\n"
         "print(json.dumps(res))\n"
@@ -871,13 +871,52 @@ def attest_source_provenance(
         "raw": data,
     }
 
-    if not pkg_file_str or not srv_file_str:
+    exp_root_res = expected_root.resolve()
+    is_under_root = True
+    mismatch_parts: list[str] = []
+
+    if pkg_file_str:
+        pkg_path = Path(pkg_file_str).resolve()
+        try:
+            pkg_path.relative_to(exp_root_res)
+        except ValueError:
+            is_under_root = False
+            mismatch_parts.append(f"package '{pkg_path}'")
+
+    if srv_file_str:
+        srv_path = Path(srv_file_str).resolve()
+        try:
+            srv_path.relative_to(exp_root_res)
+        except ValueError:
+            is_under_root = False
+            mismatch_parts.append(f"server '{srv_path}'")
+
+    if not is_under_root:
+        mismatch_msg = (
+            f"Source provenance mismatch: {' or '.join(mismatch_parts)} "
+            f"resolved outside expected source root '{exp_root_res}'"
+        )
+        if data.get("error"):
+            mismatch_msg += f" (import error: {data.get('error')})"
+        provenance_dict["error"] = mismatch_msg
+        return {
+            "status": SOURCE_PROVENANCE_MISMATCH,
+            "verified": False,
+            "expected_source_root": str(exp_root_res),
+            "resolved_package_file": pkg_file_str,
+            "resolved_module_paths": resolved_paths,
+            "interpreter": interpreter,
+            "error": mismatch_msg,
+            "provenance": provenance_dict,
+        }
+
+    if not pkg_file_str or not srv_file_str or data.get("status") != "OK":
         err = data.get("error") or "Failed to import codex_agy_bridge or codex_agy_bridge.server"
         provenance_dict["error"] = err
         return {
             "status": SOURCE_PROVENANCE_MISMATCH,
             "verified": False,
-            "expected_source_root": str(expected_root),
+            "expected_source_root": str(exp_root_res),
             "resolved_package_file": pkg_file_str,
             "resolved_module_paths": resolved_paths,
             "interpreter": interpreter,
@@ -887,31 +926,6 @@ def attest_source_provenance(
 
     pkg_path = Path(pkg_file_str).resolve()
     srv_path = Path(srv_file_str).resolve()
-    exp_root_res = expected_root.resolve()
-
-    try:
-        pkg_path.relative_to(exp_root_res)
-        srv_path.relative_to(exp_root_res)
-        is_under_root = True
-    except ValueError:
-        is_under_root = False
-
-    if not is_under_root:
-        mismatch_msg = (
-            f"Source provenance mismatch: package '{pkg_path}' or server '{srv_path}' "
-            f"resolved outside expected source root '{exp_root_res}'"
-        )
-        provenance_dict["error"] = mismatch_msg
-        return {
-            "status": SOURCE_PROVENANCE_MISMATCH,
-            "verified": False,
-            "expected_source_root": str(exp_root_res),
-            "resolved_package_file": str(pkg_path),
-            "resolved_module_paths": [str(pkg_path), str(srv_path)],
-            "interpreter": interpreter,
-            "error": mismatch_msg,
-            "provenance": provenance_dict,
-        }
 
     return {
         "status": "PASS",

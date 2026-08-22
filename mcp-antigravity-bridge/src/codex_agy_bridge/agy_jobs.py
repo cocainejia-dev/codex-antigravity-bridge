@@ -220,11 +220,17 @@ class AgyJobRegistry:
 
     def _prune_locked(self) -> int:
         cutoff = monotonic() - self._retention_seconds
-        expired = [
-            job_id
-            for job_id, record in self._jobs.items()
-            if record.completed_mono is not None and record.completed_mono <= cutoff
-        ]
+        now_mono = monotonic()
+        now_iso = _utc_now_iso()
+        expired = []
+        for job_id, record in self._jobs.items():
+            if record.completed_mono is None:
+                if record.future.done():
+                    record.completed_mono = now_mono
+                    if record.completed_at is None:
+                        record.completed_at = now_iso
+            if record.completed_mono is not None and record.completed_mono <= cutoff:
+                expired.append(job_id)
         for job_id in expired:
             del self._jobs[job_id]
         return len(expired)
@@ -532,7 +538,6 @@ class AgyJobRegistry:
 
     def status(self, job_id: str) -> dict[str, Any]:
         with self._lock:
-            self._prune_locked()
             record = self._jobs.get(job_id)
 
         # 1. Live memory status
@@ -758,7 +763,6 @@ class AgyJobRegistry:
             raise ValueError("wait_seconds must be a positive finite number")
 
         with self._lock:
-            self._prune_locked()
             record = self._jobs.get(job_id)
             future = record.future if record is not None else None
             completed = (record is not None and record.completed_at is not None)
@@ -789,6 +793,16 @@ class AgyJobRegistry:
 
     def cleanup(self) -> int:
         """Remove completed jobs older than the configured retention period."""
+        # Resolve completed futures before the monotonic retention check. A
+        # completion callback may still be persisting its terminal timestamp
+        # when cleanup is called immediately after wait() observes completion.
+        with self._lock:
+            completed = [record.future for record in self._jobs.values() if record.future.done()]
+        for future in completed:
+            try:
+                future.result()
+            except Exception:
+                pass
         with self._lock:
             mem_count = self._prune_locked()
         try:
