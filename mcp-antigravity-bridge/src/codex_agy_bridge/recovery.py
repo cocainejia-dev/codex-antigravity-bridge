@@ -601,13 +601,9 @@ class RecoveryOrchestrator:
                 checkpoint=checkpoint,
             )
 
-        # 3. Auth / Quota conditions
-        if evidence.failure_class in (
-            FailureClass.AUTH_EXPIRED,
-            FailureClass.AUTH_REQUIRED,
-            FailureClass.QUOTA_EXHAUSTED,
-            FailureClass.RATE_LIMIT,
-        ):
+        # 3. Only explicit quota exhaustion requires an account switch. Generic
+        # rate limits and authentication failures need separate recovery.
+        if record.state == RunState.ACCOUNT_SWITCH_REQUIRED or evidence.failure_class == FailureClass.QUOTA_EXHAUSTED:
             return RecoveryReport(
                 run_id=run_id,
                 task_id=record.task_id,

@@ -17,6 +17,7 @@ SRC = Path(__file__).resolve().parents[1] / "mcp-antigravity-bridge" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from codex_agy_bridge import server as server_module
 from codex_agy_bridge.contracts import RunState
 from codex_agy_bridge.run_control import (
     CredentialSecurityError,
@@ -25,12 +26,12 @@ from codex_agy_bridge.run_control import (
     RunNotTerminalError,
     WorkerResult,
 )
-from codex_agy_bridge import server as server_module
 from codex_agy_bridge.server import (
     mcp,
     run_cancel,
     run_observe,
     run_result,
+    run_resume,
     run_start,
     run_status,
     run_wait,
@@ -111,6 +112,7 @@ def test_tool_registration_preserves_existing_and_adds_vnext() -> None:
         "run_wait",
         "run_result",
         "run_cancel",
+        "run_resume",
     }
     for tool_name in expected_run_tools:
         assert tool_name in registered_names, f"Expected VNext tool {tool_name} to be registered"
@@ -220,6 +222,35 @@ def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path) -> None:
     # 3. Call with same task_id but different/no idempotency key -> DuplicateRunError
     with pytest.raises(DuplicateRunError):
         run_start(db_path=str(db_file), task=task, idempotency_key="different-key")
+
+
+def test_run_resume_preserves_same_run_and_rejects_duplicate(tmp_path: Path) -> None:
+    db_file = tmp_path / "resume.sqlite3"
+    task = _sample_task_dict(task_id="task-resume-public")
+    manager = DurableRunManager(db_file)
+    contract = server_module.TaskContract.from_dict(task)
+    initial = manager.run_start(contract, run_id="run-resume-public", auto_spawn=False)
+    start = initial.to_dict()
+    manager.store.transition_run(start["run_id"], expected_version=1, target_state=RunState.QUEUED)
+    manager.store.transition_run(
+        start["run_id"],
+        expected_version=2,
+        target_state=RunState.RUNNING,
+    )
+    manager.store.transition_run(
+        start["run_id"],
+        expected_version=3,
+        target_state=RunState.ACCOUNT_SWITCH_REQUIRED,
+        suspended_reason="Account daily quota reached",
+    )
+
+    resumed = json.loads(run_resume(str(db_file), start["run_id"], account_switched=True))
+    assert resumed["run_id"] == start["run_id"]
+    assert resumed["task_id"] == start["task_id"]
+    final = manager.run_wait(start["run_id"], timeout=2.0)
+    assert final.state == RunState.COMPLETE
+    with pytest.raises(Exception, match="ACCOUNT_SWITCH_REQUIRED"):
+        run_resume(str(db_file), start["run_id"], account_switched=True)
 
 
 def test_run_status_and_observe_shape(tmp_path: Path) -> None:

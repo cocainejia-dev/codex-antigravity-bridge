@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from .agy_runner import run_agy
-from .contracts import TaskContract
+from .agy_runner import is_quota_exhaustion, run_agy
+from .contracts import RunState, TaskContract
 from .run_control import WorkerCallback, WorkerResult
 
 
@@ -56,6 +56,15 @@ def build_worker_callback(contract: TaskContract, *, runner: Callable[..., Any] 
                 output=result.text,
                 result_summary=result.text,
                 verification_result={"passed": True, "status": "passed", "returncode": 0},
+            )
+        if is_quota_exhaustion(result.text, result.stderr):
+            return WorkerResult(
+                success=False,
+                target_state=RunState.ACCOUNT_SWITCH_REQUIRED,
+                output=result.text,
+                suspended_reason=result.text or result.stderr,
+                last_error=result.text or "AGY quota exhausted",
+                verification_result={"passed": False, "status": "quota_exhausted", "returncode": result.exit_code},
             )
         return WorkerResult(
             success=False,

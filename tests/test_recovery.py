@@ -85,6 +85,24 @@ def test_classify_error_messages() -> None:
     assert classify_error_message("Syntax error in test.py line 42") is None
 
 
+def test_transient_rate_limit_is_not_account_switch_required(tmp_path: Path) -> None:
+    db_file = tmp_path / "transient-rate.sqlite3"
+    manager = DurableRunManager(db_file)
+    orchestrator = RecoveryOrchestrator(manager)
+    contract = _create_test_contract(task_id="task-transient-rate")
+    record = manager.run_start(contract, auto_spawn=False)
+    manager.store.transition_run(record.run_id, expected_version=1, target_state=RunState.QUEUED)
+    manager.store.transition_run(
+        record.run_id,
+        expected_version=2,
+        target_state=RunState.INTERRUPTED,
+        last_error="429 Too Many Requests: server high traffic, retry later",
+    )
+    report = orchestrator.diagnose_run(record.run_id)
+    assert report.primary_failure == FailureClass.RATE_LIMIT
+    assert report.recovery_status != RecoveryStatus.ACCOUNT_SWITCH_REQUIRED
+
+
 def test_worker_crash_dead_pid_detection(tmp_path: Path) -> None:
     """Verify detection of dead external worker process PID and classification."""
     db_file = tmp_path / "dead_pid.sqlite3"

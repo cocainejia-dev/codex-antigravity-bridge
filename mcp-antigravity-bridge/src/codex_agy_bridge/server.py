@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 from pathlib import Path
+import threading
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -32,7 +33,10 @@ from .run_control import (
     RunNotTerminalError,
     WorkerResult,
 )
+from .recovery import RecoveryOrchestrator
 from .worker_binding import build_worker_callback
+
+_run_resume_lock = threading.Lock()
 
 mcp = FastMCP(
     "codex-agy-bridge",
@@ -452,3 +456,37 @@ def run_cancel(
     manager = DurableRunManager(valid_db_path)
     record = manager.run_cancel(run_id.strip(), reason=reason)
     return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_resume(
+    db_path: str,
+    run_id: str,
+    account_switched: bool = False,
+    credentials_refreshed: bool = False,
+) -> str:
+    """Resume one suspended durable run on its existing task and worktree."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    if not (account_switched or credentials_refreshed):
+        raise ValueError("run_resume requires explicit account_switched or credentials_refreshed confirmation")
+    with _run_resume_lock:
+        manager = DurableRunManager(valid_db_path)
+        record = manager.run_status(run_id.strip())
+        if record.state != RunState.ACCOUNT_SWITCH_REQUIRED:
+            raise RunControlError(f"run_resume requires ACCOUNT_SWITCH_REQUIRED, got {record.state.value}")
+        with manager._active_lock:
+            if record.run_id in manager._active_executions:
+                raise RunControlError(f"run_resume rejected: worker is still active for {record.run_id}")
+        contract = manager.store.get_task_contract(record.run_id)
+        if contract is None:
+            raise RunControlError(f"run_resume rejected: TaskContract is missing for {record.run_id}")
+        worker = build_worker_callback(contract)
+        resumed = RecoveryOrchestrator(manager).resume_same_run(
+            record.run_id,
+            worker=worker,
+            account_switched=account_switched,
+            credentials_refreshed=credentials_refreshed,
+        )
+    return json.dumps(resumed.to_dict(), ensure_ascii=False)

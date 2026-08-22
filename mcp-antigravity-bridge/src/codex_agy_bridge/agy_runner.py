@@ -87,6 +87,16 @@ _AUTH_ERROR_MARKERS = (
     "run agy to log in",
 )
 
+_QUOTA_EXHAUSTION_MARKERS = (
+    "quota exhausted",
+    "quota exceeded",
+    "resource exhausted",
+    "daily quota reached",
+    "daily limit reached",
+    "monthly limit reached",
+    "insufficient quota",
+)
+
 
 def _coerce_output(raw: object) -> str:
     """Normalize subprocess/PTY output before text processing."""
@@ -312,6 +322,12 @@ def classify_agy_error(text: str, stderr: str = "") -> str:
     if any(marker in detail for marker in _AUTH_ERROR_MARKERS):
         return "authentication"
     return "unknown"
+
+
+def is_quota_exhaustion(text: str, stderr: str = "") -> bool:
+    """Return true only for explicit provider quota exhaustion wording."""
+    detail = f"{text}\n{stderr}".lower()
+    return any(marker in detail for marker in _QUOTA_EXHAUSTION_MARKERS)
 
 
 def describe_agy_failure(result: AgyResult) -> str:

@@ -93,6 +93,32 @@ def test_callback_maps_runner_failure(monkeypatch):
     assert result.last_error == "provider failed"
 
 
+def test_callback_maps_explicit_quota_exhaustion_to_account_switch():
+    fake_runner = lambda *args, **kwargs: AgyResult(
+        text="429: Account daily quota reached",
+        exit_code=1,
+        used_pty=False,
+    )
+    contract = _contract()
+    result = build_worker_callback(contract, runner=fake_runner)(_context(contract))
+
+    assert result.success is False
+    assert result.target_state.value == "ACCOUNT_SWITCH_REQUIRED"
+
+
+def test_callback_does_not_map_transient_429_to_account_switch():
+    fake_runner = lambda *args, **kwargs: AgyResult(
+        text="429: server high traffic, retry later",
+        exit_code=1,
+        used_pty=False,
+    )
+    contract = _contract()
+    result = build_worker_callback(contract, runner=fake_runner)(_context(contract))
+
+    assert result.success is False
+    assert result.target_state is None
+
+
 def test_factory_rejects_invalid_contract_without_worker():
     with pytest.raises(ValueError):
         build_worker_callback(None)  # type: ignore[arg-type]

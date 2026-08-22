@@ -51,6 +51,7 @@ def test_mcp_stdio_server_lists_all_tools() -> None:
         "run_wait",
         "run_result",
         "run_cancel",
+        "run_resume",
     }
 
 
