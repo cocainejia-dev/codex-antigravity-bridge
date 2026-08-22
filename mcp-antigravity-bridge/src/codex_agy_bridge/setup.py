@@ -151,11 +151,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--what-if", action="store_true", help="print the setup plan only")
     parser.add_argument("--proxy-url", help="explicit proxy URL without embedded credentials")
     parser.add_argument("--no-proxy", action="store_true", help="remove managed proxy settings")
+    parser.add_argument("--doctor", action="store_true", help="run diagnostics and health check")
     return parser
 
 
 def _main(argv: list[str] | None = None) -> int:
+    if argv and argv[0] in ("doctor", "--doctor"):
+        from .doctor import main as doctor_main
+
+        return doctor_main(argv[1:])
+
     args = build_parser().parse_args(argv)
+    if args.doctor:
+        from .doctor import main as doctor_main
+
+        return doctor_main([])
+
     if args.proxy_url and args.no_proxy:
         raise SystemExit("--proxy-url and --no-proxy are mutually exclusive")
 
