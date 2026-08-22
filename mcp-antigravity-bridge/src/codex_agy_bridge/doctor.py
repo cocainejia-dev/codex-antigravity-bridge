@@ -80,8 +80,14 @@ def _normalize_path_str(path_str: str) -> str:
 
 def _paths_equal(path_a: str | Path, path_b: str | Path) -> bool:
     try:
-        norm_a = _normalize_path_str(str(Path(path_a).resolve()))
-        norm_b = _normalize_path_str(str(Path(path_b).resolve()))
+        raw_a = str(path_a)
+        raw_b = str(path_b)
+        if (len(raw_a) >= 2 and raw_a[1] == ":") or (len(raw_b) >= 2 and raw_b[1] == ":"):
+            norm_a = _normalize_path_str(raw_a)
+            norm_b = _normalize_path_str(raw_b)
+        else:
+            norm_a = _normalize_path_str(str(Path(path_a).resolve()))
+            norm_b = _normalize_path_str(str(Path(path_b).resolve()))
         return norm_a == norm_b
     except Exception:
         return _normalize_path_str(str(path_a)) == _normalize_path_str(str(path_b))
