@@ -84,6 +84,18 @@ class _SimpleMonkeyPatch:
         self._undos.clear()
 
 
+def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
+    """Wait for an asynchronous test condition without unbounded polling."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AssertionError("condition was not satisfied before timeout")
+        time.sleep(min(interval, remaining))
+
+
 def test_default_db_path_outside_repository():
     path = get_default_db_path()
     assert "codex-agy-bridge" in str(path)
@@ -301,22 +313,24 @@ def test_watchdog_worktree_activity_and_idle_health(monkeypatch=None):
         )
         try:
             job_id = registry.start("Worktree task", workdir=git_dir)
-            time.sleep(0.08)
+            _wait_until(
+                lambda: registry.status(job_id)["last_worktree_activity_at"] is not None,
+            )
 
             status = registry.status(job_id)
             assert status["state"] == "running"
             assert status["last_worktree_activity_at"] is not None
 
             # After idle threshold without changes, health becomes IDLE
-            time.sleep(0.12)
+            _wait_until(lambda: registry.status(job_id)["health"] == "IDLE")
             idle_status = registry.status(job_id)
             assert idle_status["health"] == "IDLE"
 
             # Modify worktree file
             test_file.write_text("modified content", encoding="utf-8")
-            time.sleep(0.08)
 
             # Watchdog picks up change and returns health to HEALTHY
+            _wait_until(lambda: registry.status(job_id)["health"] == "HEALTHY")
             active_status = registry.status(job_id)
             assert active_status["health"] == "HEALTHY"
 
