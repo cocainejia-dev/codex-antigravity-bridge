@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any, Callable
 
@@ -33,6 +34,18 @@ def _build_prompt(contract: TaskContract) -> str:
     )
 
 
+def _accepts_liveness_probe(runner: Callable[..., Any]) -> bool:
+    """Check if runner accepts liveness_probe without breaking injected test doubles."""
+    try:
+        sig = inspect.signature(runner)
+    except (ValueError, TypeError):
+        return True
+    params = sig.parameters.values()
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+        return True
+    return "liveness_probe" in sig.parameters
+
+
 def build_worker_callback(
     contract: TaskContract,
     *,
@@ -46,13 +59,26 @@ def build_worker_callback(
     prompt = _build_prompt(contract)
 
     def _worker(context) -> WorkerResult:
+        def _liveness_probe() -> bool:
+            try:
+                context.heartbeat()
+            except Exception:
+                pass
+            try:
+                return not context.is_cancelled()
+            except Exception:
+                return True
+
         try:
-            runner_kwargs = {
+            runner_kwargs: dict[str, Any] = {
                 "workdir": context.worktree or contract.workdir,
                 "timeout": float(contract.max_runtime),
             }
             if dangerously_skip_permissions:
                 runner_kwargs["dangerously_skip_permissions"] = True
+            if _accepts_liveness_probe(runner):
+                runner_kwargs["liveness_probe"] = _liveness_probe
+
             result = runner(prompt, **runner_kwargs)
         except Exception as exc:  # Worker lifecycle records the failure durably.
             return WorkerResult(success=False, last_error=str(exc))

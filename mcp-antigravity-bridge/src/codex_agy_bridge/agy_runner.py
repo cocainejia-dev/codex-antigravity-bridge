@@ -58,6 +58,9 @@ _NETWORK_ERROR_MARKERS = (
     "connection refused",
     "connection reset",
     "connection timed out",
+    "connect timeout",
+    "tls handshake timeout",
+    "socket timeout",
     "network is unreachable",
     "no such host",
     "proxyconnect",
@@ -67,8 +70,6 @@ _NETWORK_ERROR_MARKERS = (
     "could not connect",
     "failed to fetch",
     "network error",
-    "timed out",
-    "timeout",
     "eof while connecting",
 )
 _AUTH_ERROR_MARKERS = (
@@ -85,6 +86,13 @@ _AUTH_ERROR_MARKERS = (
     "oauth token",
     "please run `agy`",
     "run agy to log in",
+)
+
+_TIMEOUT_ERROR_MARKERS = (
+    "timed out",
+    "timeout",
+    "deadline exceeded",
+    "time limit exceeded",
 )
 
 _QUOTA_EXHAUSTION_MARKERS = (
@@ -321,6 +329,8 @@ def classify_agy_error(text: str, stderr: str = "") -> str:
         return "network"
     if any(marker in detail for marker in _AUTH_ERROR_MARKERS):
         return "authentication"
+    if any(marker in detail for marker in _TIMEOUT_ERROR_MARKERS):
+        return "timeout"
     return "unknown"
 
 
@@ -344,6 +354,11 @@ def describe_agy_failure(result: AgyResult) -> str:
             "AGY_LOGIN_REQUIRED: agy authentication is required. "
             "Run `agy` interactively through the working proxy, complete login, "
             "then tell Codex to retry the task once. "
+            f"Original error: {detail}"
+        )
+    if kind == "timeout":
+        return (
+            "AGY_TIMEOUT: agy execution timed out. "
             f"Original error: {detail}"
         )
     return f"AGY_FAILED: agy exited with code {result.exit_code}: {detail}"
@@ -527,7 +542,10 @@ def _run_subprocess(
                 continue
     except TimeoutError:
         proc.kill()
-        proc.communicate()
+        try:
+            proc.communicate()
+        except Exception:
+            pass
         raise
 
 

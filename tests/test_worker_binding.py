@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from codex_agy_bridge.agy_runner import AgyResult
-from codex_agy_bridge.contracts import TaskContract
+from codex_agy_bridge.contracts import RunRecord, TaskContract
 from codex_agy_bridge.run_control import WorkerContext
 from codex_agy_bridge.worker_binding import build_worker_callback
 
@@ -36,9 +37,6 @@ def _contract(**overrides):
 
 
 def _context(contract: TaskContract) -> WorkerContext:
-    import threading
-    from codex_agy_bridge.contracts import RunRecord
-
     return WorkerContext(
         run_id="run-binding",
         task_contract=contract,
@@ -67,7 +65,8 @@ def test_callback_maps_contract_to_existing_runner(monkeypatch):
     assert contract.task_id in prompt
     assert workdir == contract.workdir
     assert timeout == 17
-    assert kwargs == {}
+    assert "liveness_probe" in kwargs
+    assert callable(kwargs["liveness_probe"])
 
 
 def test_callback_forwards_explicit_permission_bypass_only_when_authorized():
@@ -84,7 +83,65 @@ def test_callback_forwards_explicit_permission_bypass_only_when_authorized():
         dangerously_skip_permissions=True,
     )(_context(contract))
 
-    assert calls == [{"dangerously_skip_permissions": True}]
+    assert len(calls) == 1
+    assert calls[0]["dangerously_skip_permissions"] is True
+    assert "liveness_probe" in calls[0]
+
+
+def test_callback_liveness_probe_pulses_heartbeat_and_honors_cancellation():
+    heartbeat_count = 0
+
+    def _count_heartbeat():
+        nonlocal heartbeat_count
+        heartbeat_count += 1
+
+    captured_probe = None
+
+    def fake_runner(prompt, workdir, timeout, **kwargs):
+        nonlocal captured_probe
+        captured_probe = kwargs.get("liveness_probe")
+        return AgyResult(text="ok", exit_code=0, used_pty=False)
+
+    contract = _contract()
+    cancel_evt = threading.Event()
+    ctx = WorkerContext(
+        run_id="run-probe-test",
+        task_contract=contract,
+        cancel_event=cancel_evt,
+        heartbeat_callback=_count_heartbeat,
+        record=RunRecord(run_id="run-probe-test", task_id=contract.task_id),
+        worktree=contract.workdir,
+    )
+
+    result = build_worker_callback(contract, runner=fake_runner)(ctx)
+    assert result.success is True
+    assert captured_probe is not None
+    assert callable(captured_probe)
+
+    # First probe call: pulses heartbeat and returns True (uncancelled)
+    assert captured_probe() is True
+    assert heartbeat_count == 1
+
+    # Second probe call after cancellation: pulses heartbeat and returns False
+    cancel_evt.set()
+    assert captured_probe() is False
+    assert heartbeat_count == 2
+
+
+def test_callback_runner_injection_without_liveness_probe_compatibility():
+    calls = []
+
+    def simple_runner(prompt, workdir, timeout):
+        calls.append((prompt, workdir, timeout))
+        return AgyResult(text="simple-ok", exit_code=0, used_pty=False)
+
+    contract = _contract()
+    result = build_worker_callback(contract, runner=simple_runner)(_context(contract))
+    assert result.success is True
+    assert result.result_summary == "simple-ok"
+    assert len(calls) == 1
+    assert calls[0][1] == contract.workdir
+    assert calls[0][2] == 17
 
 
 def test_callback_factory_accepts_injected_runner_without_global_patch():
