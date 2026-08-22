@@ -7,10 +7,10 @@
 - `RUNTIME_RESOLVED_HEAD`: discover at startup; do not write the containing
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
-- `CURRENT_PHASE`: `PHASE 11.4 / RELEASE HARDENING`.
-- `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
+- `CURRENT_PHASE`: `PHASE 11.5 / CI PACKAGING RELEASE CANDIDATE`.
+- `CURRENT_TASK`: `WAITING_FOR_SEPARATE_LIVE_AGY_AUTHORIZATION`.
 - `STATE`: `WAITING_FOR_USER_DIRECTION`.
-- `LAST_VERIFIED_COMMIT`: `b3b5fb3` (Phase 11.4 release-hardening verification).
+- `LAST_VERIFIED_COMMIT`: `289923a` (Phase 11.5 deterministic/package gate verification).
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 source provenance: PASS.
@@ -45,6 +45,19 @@
 - `PHASE11_4_TECHNICAL_HARDENING`: PASS.
 - `PHASE11_4_RELEASE_HARDENING`: PASS.
 - `READY_FOR_PHASE11_5_RC`: YES.
+- `VERSION_SOURCE_OF_TRUTH`: `mcp-antigravity-bridge/pyproject.toml`.
+- `VERSION_CONFLICT`: `NO`.
+- `LIVE_AGY_SMOKE`: `FORBIDDEN_UNTIL_SEPARATE_AUTHORIZATION`.
+- `FRESH_CLONE`: PASS.
+- `FRESH_ENV_INSTALL`: PASS.
+- `FULL_PYTEST`: PASS (`288 passed, 1 warning`).
+- `RUFF_CHANGED_SCOPE`: PASS.
+- `COMPILEALL`: PASS.
+- `WHEEL_BUILD`: PASS.
+- `SDIST_BUILD`: PASS.
+- `ARTIFACT_INSTALL_IMPORT`: PASS.
+- `ARTIFACT_HYGIENE`: PASS.
+- `LOCAL_CI_EQUIVALENT`: PASS.
 - `NEXT_RECOMMENDED_TASK`: `PHASE11.5_CI_PACKAGING_RELEASE_CANDIDATE`.
 
 ## Repository Roles
@@ -61,7 +74,7 @@
 - Fresh-client runtime acceptance: PASS (fresh controller smoke and one
   disposable durable async acceptance).
 - MCP runtime cutover: PASS.
-- `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
+- `NEXT_SAFE_ACTION`: `WAIT_FOR_SEPARATE_LIVE_AGY_AUTHORIZATION`.
 
 ## Verification
 

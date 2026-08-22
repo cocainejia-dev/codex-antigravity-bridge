@@ -44,5 +44,52 @@ jobs:
         working-directory: mcp-antigravity-bridge
         run: python -m compileall -q src
 
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install build
+          python -m build mcp-antigravity-bridge
+
+      - name: Install and verify wheel artifact
+        shell: python
+        run: |
+          import glob
+          import os
+          import subprocess
+          import sys
+          from importlib.metadata import version
+
+          wheels = glob.glob(os.path.join("mcp-antigravity-bridge", "dist", "*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {wheels}")
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", wheels[0]])
+          probe = (
+              "import importlib.metadata as m; "
+              "import codex_agy_bridge, codex_agy_bridge.server, "
+              "codex_agy_bridge.run_control, codex_agy_bridge.worker_binding, "
+              "codex_agy_bridge.agy_jobs, codex_agy_bridge.agy_runner; "
+              "assert codex_agy_bridge.__version__ == '0.1.0'; "
+              "assert m.version('codex-agy-bridge') == '0.1.0'"
+          )
+          subprocess.check_call([sys.executable, "-c", probe], env={**os.environ, "PYTHONPATH": ""})
+          if version("codex-agy-bridge") != "0.1.0":
+              raise SystemExit("artifact metadata version mismatch")
+
+      - name: Check package artifact hygiene
+        shell: python
+        run: |
+          import glob
+          import os
+          import zipfile
+
+          artifacts = glob.glob(os.path.join("mcp-antigravity-bridge", "dist", "*"))
+          if {os.path.basename(path).split(".")[-1] for path in artifacts} != {"whl", "gz"}:
+              raise SystemExit(f"unexpected artifacts: {artifacts}")
+          forbidden = ("GEMINI_API_KEY", "client_secret", "access_token", ".codex")
+          for wheel in glob.glob(os.path.join("mcp-antigravity-bridge", "dist", "*.whl")):
+              with zipfile.ZipFile(wheel) as archive:
+                  names = archive.namelist()
+                  if any(any(token in name for token in forbidden) for name in names):
+                      raise SystemExit("forbidden private artifact path")
+
       - name: Check patch whitespace
         run: git diff --check

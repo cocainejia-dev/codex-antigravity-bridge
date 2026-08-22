@@ -186,9 +186,12 @@ for a reproducible dry-run and live-demo checklist.
 ## Release status
 
 Version `0.1.0` has completed stabilization and clean-room acceptance and is in
-Phase 11.4 release hardening. CI, package builds, package-index publication,
-and release-candidate tagging are deferred to Phase 11.5; this is not a
-published package yet. See [docs/RELEASE_HARDENING.md](docs/RELEASE_HARDENING.md).
+the Phase 11.5 CI and packaging release-candidate process. The authoritative
+version lives in `mcp-antigravity-bridge/pyproject.toml`; package imports read
+installed metadata and do not maintain a second release constant. Deterministic
+CI does not require an Antigravity account, Google AI Pro, or any API key.
+Package-index publication and release-candidate tagging remain out of scope.
+See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
 
 ## Development
 

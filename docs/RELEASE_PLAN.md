@@ -38,12 +38,24 @@ project status, not a live runtime process list or durable job database state.
 - Ready for release hardening: YES.
 - Next safe action: `WAIT_FOR_USER_DIRECTION`.
 
+## Phase 11.5 / CI, packaging, and release candidate
+
+- Version source of truth: `mcp-antigravity-bridge/pyproject.toml`.
+- Package runtime metadata reads the installed distribution version and keeps
+  source-tree imports safe without inventing a release version.
+- CI covers Windows/Linux, Python 3.10/3.12, tests, Ruff, compileall, wheel and
+  sdist builds, artifact installation/import, and package hygiene.
+- Live AGY acceptance is intentionally deferred until deterministic and package
+  gates are independently accepted.
+- GitHub publication, tagging, release creation, and package upload remain
+  forbidden in this phase.
+
 ## Subsequent phases
 
 - Phase 11.4: release hardening: PASS. Public documentation, runtime-state
   hygiene, portable identity diagnostics, fail-closed provenance guidance,
   security boundaries, and release metadata are complete.
-- Phase 11.5: CI, packaging, and release candidate.
+- Phase 11.5: CI, packaging, and release candidate (in progress).
 - Phase 11.6: GitHub publication.
 
 Phase 11.4 is complete. Do not begin Phase 11.5 without explicit user

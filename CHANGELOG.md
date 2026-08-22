@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prepared the 0.1.0 CI and packaging release candidate with metadata-driven
+  package version reporting, wheel/sdist verification, and artifact hygiene
+  checks.
 - Consolidated user documentation around the root READMEs, docs index, and demo.
 - Replaced the long package runtime manual with a short package-level install note.
 - Documented current proxy setup, dry-run collaboration checks, and verification counts.
