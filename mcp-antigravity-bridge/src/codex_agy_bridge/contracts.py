@@ -80,6 +80,26 @@ class AutoCommitPolicy(str, Enum):
         raise ValueError(f"Unknown auto commit policy: {val!r}")
 
 
+class TimeoutClassification(str, Enum):
+    """Explicit deterministic classification of timeout failures."""
+
+    CONNECT_TIMEOUT = "CONNECT_TIMEOUT"
+    REMOTE_EXECUTION_TIMEOUT = "REMOTE_EXECUTION_TIMEOUT"
+    LOCAL_SUPERVISION_TIMEOUT = "LOCAL_SUPERVISION_TIMEOUT"
+
+    @classmethod
+    def from_value(cls, val: str | TimeoutClassification) -> TimeoutClassification:
+        if isinstance(val, cls):
+            return val
+        if not isinstance(val, str):
+            raise ValueError(f"Invalid timeout classification type: {type(val).__name__}")
+        norm = val.strip().upper().replace("-", "_").replace(" ", "_")
+        for member in cls:
+            if member.value == norm or member.name == norm:
+                return member
+        raise ValueError(f"Unknown timeout classification: {val!r}")
+
+
 class RunState(str, Enum):
     """Exact lifecycle states for a VNext run."""
 

@@ -34,8 +34,8 @@ def _build_prompt(contract: TaskContract) -> str:
     )
 
 
-def _accepts_liveness_probe(runner: Callable[..., Any]) -> bool:
-    """Check if runner accepts liveness_probe without breaking injected test doubles."""
+def _accepts_param(runner: Callable[..., Any], param_name: str) -> bool:
+    """Check if runner accepts a parameter without breaking injected test doubles."""
     try:
         sig = inspect.signature(runner)
     except (ValueError, TypeError):
@@ -43,7 +43,12 @@ def _accepts_liveness_probe(runner: Callable[..., Any]) -> bool:
     params = sig.parameters.values()
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
         return True
-    return "liveness_probe" in sig.parameters
+    return param_name in sig.parameters
+
+
+def _accepts_liveness_probe(runner: Callable[..., Any]) -> bool:
+    """Check if runner accepts liveness_probe without breaking injected test doubles."""
+    return _accepts_param(runner, "liveness_probe")
 
 
 def build_worker_callback(
@@ -51,6 +56,7 @@ def build_worker_callback(
     *,
     runner: Callable[..., Any] = run_agy,
     dangerously_skip_permissions: bool = False,
+    max_liveness_extensions: int = 3,
 ) -> WorkerCallback:
     """Build one durable worker callback backed by the existing AGY primitive."""
     if not isinstance(contract, TaskContract):
@@ -59,7 +65,13 @@ def build_worker_callback(
     prompt = _build_prompt(contract)
 
     def _worker(context) -> WorkerResult:
+        probes_count = 0
+
         def _liveness_probe() -> bool:
+            nonlocal probes_count
+            probes_count += 1
+            if max_liveness_extensions is not None and probes_count > max_liveness_extensions:
+                return False
             try:
                 context.heartbeat()
             except Exception:
@@ -78,6 +90,8 @@ def build_worker_callback(
                 runner_kwargs["dangerously_skip_permissions"] = True
             if _accepts_liveness_probe(runner):
                 runner_kwargs["liveness_probe"] = _liveness_probe
+            if _accepts_param(runner, "max_liveness_extensions"):
+                runner_kwargs["max_liveness_extensions"] = max_liveness_extensions
 
             result = runner(prompt, **runner_kwargs)
         except Exception as exc:  # Worker lifecycle records the failure durably.

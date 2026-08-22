@@ -14,20 +14,29 @@ if str(SRC) not in sys.path:
 
 from codex_agy_bridge import agy_runner
 from codex_agy_bridge.agy_runner import (
+    CONNECT_TIMEOUT,
+    LOCAL_SUPERVISION_TIMEOUT,
+    REMOTE_EXECUTION_TIMEOUT,
     AgyResult,
+    LocalSupervisionTimeoutError,
     classify_agy_error,
     describe_agy_failure,
     run_agy,
 )
 
 
-def test_classify_agy_error_network_connect_transport_markers():
-    network_samples = [
-        "dial tcp 127.0.0.1:7890: connectex: connection refused",
+def test_classify_agy_error_network_and_connect_timeout_markers():
+    connect_samples = [
         "connection timed out",
         "connect timeout after 5000ms",
         "tls handshake timeout",
         "socket timeout while writing request",
+    ]
+    for sample in connect_samples:
+        assert classify_agy_error(sample) == CONNECT_TIMEOUT, f"Expected CONNECT_TIMEOUT for: {sample}"
+
+    network_samples = [
+        "dial tcp 127.0.0.1:7890: connectex: connection refused",
         "proxyconnect tcp: dial tcp 127.0.0.1:7890: connect: connection refused",
         "network is unreachable",
         "no such host: api.antigravity.google",
@@ -53,21 +62,39 @@ def test_classify_agy_error_authentication_markers():
         assert classify_agy_error(sample) == "authentication", f"Expected auth for: {sample}"
 
 
-def test_classify_agy_error_timeout_not_conflated_with_network():
-    # Local supervision TimeoutError and remote execution timeout text
-    timeout_samples = [
+def test_classify_agy_error_timeout_granularity():
+    # 1. Local supervision TimeoutError markers
+    local_samples = [
         "TimeoutError: agy timed out after 300.0s",
+        "LOCAL_SUPERVISION_TIMEOUT: agy timed out after 17.0s",
         "agy timed out after 17.0s",
+    ]
+    for sample in local_samples:
+        kind = classify_agy_error(sample)
+        assert kind == LOCAL_SUPERVISION_TIMEOUT, f"Expected LOCAL_SUPERVISION_TIMEOUT for {sample}, got {kind}"
+
+    # 2. Remote execution timeout text
+    remote_samples = [
         "command timed out after 60 seconds",
         "pytest execution timed out",
         "test execution timed out after 120s",
         "deadline exceeded while waiting for task completion",
         "time limit exceeded during build step",
     ]
-    for sample in timeout_samples:
+    for sample in remote_samples:
         kind = classify_agy_error(sample)
-        assert kind == "timeout", f"Expected timeout for {sample}, got {kind}"
-        assert kind != "network", f"Conflated timeout with network for {sample}"
+        assert kind == REMOTE_EXECUTION_TIMEOUT, f"Expected REMOTE_EXECUTION_TIMEOUT for {sample}, got {kind}"
+
+    # 3. Connect timeout markers
+    connect_samples = [
+        "connect timeout after 5000ms",
+        "connection timed out",
+        "tls handshake timeout",
+        "socket timeout while writing request",
+    ]
+    for sample in connect_samples:
+        kind = classify_agy_error(sample)
+        assert kind == CONNECT_TIMEOUT, f"Expected CONNECT_TIMEOUT for {sample}, got {kind}"
 
 
 def test_classify_agy_error_unknown_for_other_errors():
@@ -124,7 +151,7 @@ def test_run_agy_network_error_forces_proxy_refresh(monkeypatch):
 
     result = run_agy("test prompt")
     assert result.exit_code == 1
-    assert True in force_calls  # force=True was called for network error
+    assert True in force_calls  # force=True was called for network/connect error
 
 
 def test_run_agy_timeout_does_not_force_proxy_refresh(monkeypatch):
@@ -197,7 +224,7 @@ def test_run_subprocess_liveness_probe_false_terminates_child(monkeypatch):
     def probe():
         return False
 
-    with pytest.raises(TimeoutError, match="agy timed out"):
+    with pytest.raises((TimeoutError, LocalSupervisionTimeoutError), match="agy timed out"):
         agy_runner._run_subprocess(
             ["agy", "-p", "test"],
             workdir=None,
@@ -207,3 +234,86 @@ def test_run_subprocess_liveness_probe_false_terminates_child(monkeypatch):
         )
 
     assert mock_proc.kill.called
+
+
+def test_run_subprocess_repeated_positive_probes_eventually_cause_timeout(monkeypatch):
+    mock_proc = MagicMock()
+
+    def mock_communicate(timeout=None):
+        if mock_proc.kill.called:
+            return ("", "")
+        time.sleep(0.01)
+        raise subprocess.TimeoutExpired(cmd=["agy"], timeout=timeout)
+
+    mock_proc.communicate.side_effect = mock_communicate
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: mock_proc)
+
+    probe_calls = 0
+
+    def always_alive():
+        nonlocal probe_calls
+        probe_calls += 1
+        return True
+
+    with pytest.raises(LocalSupervisionTimeoutError, match="LOCAL_SUPERVISION_TIMEOUT"):
+        agy_runner._run_subprocess(
+            ["agy", "-p", "test"],
+            workdir=None,
+            timeout=0.01,
+            liveness_probe=always_alive,
+            stall_grace_seconds=0.01,
+            max_liveness_extensions=2,
+        )
+
+    assert mock_proc.kill.called
+    assert probe_calls == 2
+
+
+def test_run_agy_no_pty_fallback_when_direct_exit_0_has_stderr_evidence(monkeypatch):
+    monkeypatch.setattr(agy_runner, "find_agy", lambda: "fake_agy")
+    pty_called = False
+
+    def fake_run_subprocess(args, workdir, timeout, env=None, **kwargs):
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="",
+            stderr="[INFO] task execution finished on remote agent",
+        )
+
+    def fake_run_with_pty(*args, **kwargs):
+        nonlocal pty_called
+        pty_called = True
+        return ("unexpected duplicate execution", 0)
+
+    monkeypatch.setattr(agy_runner, "_run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(agy_runner, "_run_with_pty", fake_run_with_pty)
+
+    result = run_agy("execute contract")
+    assert result.exit_code == 0
+    assert result.used_pty is False
+    assert "[INFO] task execution finished on remote agent" in result.text
+    assert pty_called is False, "PTY fallback must not be called when direct exit 0 has stderr evidence"
+
+
+def test_run_agy_pty_fallback_when_direct_exit_0_has_empty_stdout_and_empty_stderr(monkeypatch):
+    monkeypatch.setattr(agy_runner, "find_agy", lambda: "fake_agy")
+    pty_called = False
+
+    def fake_run_subprocess(args, workdir, timeout, env=None, **kwargs):
+        # Empty stdout and empty stderr represents the upstream #76 isatty gate
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    def fake_run_with_pty(*args, **kwargs):
+        nonlocal pty_called
+        pty_called = True
+        return ("recovered via pty", 0)
+
+    monkeypatch.setattr(agy_runner, "_run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(agy_runner, "_run_with_pty", fake_run_with_pty)
+
+    result = run_agy("execute contract")
+    assert result.exit_code == 0
+    assert result.used_pty is True
+    assert result.text == "recovered via pty"
+    assert pty_called is True

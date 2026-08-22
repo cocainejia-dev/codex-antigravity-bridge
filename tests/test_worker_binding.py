@@ -196,3 +196,30 @@ def test_callback_does_not_map_transient_429_to_account_switch():
 def test_factory_rejects_invalid_contract_without_worker():
     with pytest.raises(ValueError):
         build_worker_callback(None)  # type: ignore[arg-type]
+
+
+def test_callback_liveness_probe_bounded_eventually_returns_false():
+    captured_probe = None
+
+    def fake_runner(prompt, workdir, timeout, **kwargs):
+        nonlocal captured_probe
+        captured_probe = kwargs.get("liveness_probe")
+        return AgyResult(text="ok", exit_code=0, used_pty=False)
+
+    contract = _contract()
+    ctx = _context(contract)
+    build_worker_callback(
+        contract,
+        runner=fake_runner,
+        max_liveness_extensions=2,
+    )(ctx)
+
+    assert captured_probe is not None
+    assert callable(captured_probe)
+
+    # First probe call: within bound -> True
+    assert captured_probe() is True
+    # Second probe call: within bound -> True
+    assert captured_probe() is True
+    # Third probe call: exceeds max_liveness_extensions (2) -> False
+    assert captured_probe() is False

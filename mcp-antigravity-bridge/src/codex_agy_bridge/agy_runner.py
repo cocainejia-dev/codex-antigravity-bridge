@@ -27,6 +27,20 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
+from .contracts import TimeoutClassification
+
+CONNECT_TIMEOUT = TimeoutClassification.CONNECT_TIMEOUT.value
+REMOTE_EXECUTION_TIMEOUT = TimeoutClassification.REMOTE_EXECUTION_TIMEOUT.value
+LOCAL_SUPERVISION_TIMEOUT = TimeoutClassification.LOCAL_SUPERVISION_TIMEOUT.value
+DEFAULT_MAX_LIVENESS_EXTENSIONS = 3
+
+
+class LocalSupervisionTimeoutError(TimeoutError):
+    """Raised when local subprocess or PTY execution exceeds the supervision deadline."""
+
+    pass
+
+
 # --- ANSI / TUI noise stripping -------------------------------------------
 
 _ANSI_CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -52,26 +66,6 @@ _PROXY_CACHE_TTL = 60.0
 _proxy_cache: tuple[float, Optional[str]] | None = None
 _proxy_cache_lock = threading.Lock()
 
-_NETWORK_ERROR_MARKERS = (
-    "dial tcp",
-    "connectex",
-    "connection refused",
-    "connection reset",
-    "connection timed out",
-    "connect timeout",
-    "tls handshake timeout",
-    "socket timeout",
-    "network is unreachable",
-    "no such host",
-    "proxyconnect",
-    "proxy connection",
-    "connection failed",
-    "failed to connect",
-    "could not connect",
-    "failed to fetch",
-    "network error",
-    "eof while connecting",
-)
 _AUTH_ERROR_MARKERS = (
     "authentication required",
     "authentication failed",
@@ -88,11 +82,58 @@ _AUTH_ERROR_MARKERS = (
     "run agy to log in",
 )
 
-_TIMEOUT_ERROR_MARKERS = (
-    "timed out",
-    "timeout",
+_LOCAL_SUPERVISION_TIMEOUT_MARKERS = (
+    "local supervision timeout",
+    "local_supervision_timeout",
+    "timeouterror: agy timed out",
+    "timeouterror: agy execution exceeded",
+    "agy timed out after",
+    "subprocess timeout",
+    "pty timeout",
+)
+
+_CONNECT_TIMEOUT_MARKERS = (
+    "connect timeout",
+    "connection timed out",
+    "tls handshake timeout",
+    "socket timeout",
+    "handshake timeout",
+    "connect timed out",
+)
+
+_REMOTE_EXECUTION_TIMEOUT_MARKERS = (
     "deadline exceeded",
     "time limit exceeded",
+    "execution timed out",
+    "backend timeout",
+    "remote timeout",
+    "command timed out",
+    "pytest execution timed out",
+    "test execution timed out",
+    "gateway timeout",
+    "504 gateway time-out",
+)
+
+_GENERIC_TIMEOUT_MARKERS = (
+    "timed out",
+    "timeout",
+)
+
+_NETWORK_ERROR_MARKERS = (
+    "dial tcp",
+    "connectex",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
+    "no such host",
+    "proxyconnect",
+    "proxy connection",
+    "connection failed",
+    "failed to connect",
+    "could not connect",
+    "failed to fetch",
+    "network error",
+    "eof while connecting",
 )
 
 _QUOTA_EXHAUSTION_MARKERS = (
@@ -325,12 +366,18 @@ def resolve_agy_environment(force: bool = False) -> dict[str, str]:
 def classify_agy_error(text: str, stderr: str = "") -> str:
     """Classify an AGY failure for user-facing recovery guidance."""
     detail = f"{text}\n{stderr}".lower()
-    if any(marker in detail for marker in _NETWORK_ERROR_MARKERS):
-        return "network"
     if any(marker in detail for marker in _AUTH_ERROR_MARKERS):
         return "authentication"
-    if any(marker in detail for marker in _TIMEOUT_ERROR_MARKERS):
-        return "timeout"
+    if any(marker in detail for marker in _LOCAL_SUPERVISION_TIMEOUT_MARKERS):
+        return LOCAL_SUPERVISION_TIMEOUT
+    if any(marker in detail for marker in _CONNECT_TIMEOUT_MARKERS):
+        return CONNECT_TIMEOUT
+    if any(marker in detail for marker in _NETWORK_ERROR_MARKERS):
+        return "network"
+    if any(marker in detail for marker in _REMOTE_EXECUTION_TIMEOUT_MARKERS) or any(
+        marker in detail for marker in _GENERIC_TIMEOUT_MARKERS
+    ):
+        return REMOTE_EXECUTION_TIMEOUT
     return "unknown"
 
 
@@ -343,7 +390,7 @@ def is_quota_exhaustion(text: str, stderr: str = "") -> bool:
 def describe_agy_failure(result: AgyResult) -> str:
     detail = result.text or result.stderr or "agy returned no diagnostic output"
     kind = classify_agy_error(result.text, result.stderr)
-    if kind == "network":
+    if kind in ("network", CONNECT_TIMEOUT):
         return (
             "AGY_PROXY_ERROR: agy could not reach its network endpoint. "
             "Check the local proxy or TUN mode before retrying. "
@@ -356,7 +403,7 @@ def describe_agy_failure(result: AgyResult) -> str:
             "then tell Codex to retry the task once. "
             f"Original error: {detail}"
         )
-    if kind == "timeout":
+    if kind in ("timeout", REMOTE_EXECUTION_TIMEOUT, LOCAL_SUPERVISION_TIMEOUT):
         return (
             "AGY_TIMEOUT: agy execution timed out. "
             f"Original error: {detail}"
@@ -372,6 +419,7 @@ def run_agy(
     dangerously_skip_permissions: bool = False,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
+    max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -410,12 +458,13 @@ def run_agy(
         runner_options = {
             "liveness_probe": liveness_probe,
             "stall_grace_seconds": stall_grace_seconds,
+            "max_liveness_extensions": max_liveness_extensions,
         }
     direct = _run_subprocess(args, launch_workdir, timeout, environment, **runner_options)
     direct_text = clean_agy_output(direct.stdout)
     direct_stderr = clean_agy_output(direct.stderr)
-    if direct_text or direct.returncode != 0:
-        if classify_agy_error(direct_text, direct_stderr) == "network":
+    if direct_text or direct_stderr or direct.returncode != 0:
+        if classify_agy_error(direct_text, direct_stderr) in ("network", CONNECT_TIMEOUT):
             resolve_agy_environment(force=True)
         return AgyResult(
             text=direct_text or direct_stderr or "agy returned no diagnostic output",
@@ -428,7 +477,7 @@ def run_agy(
         pty_text, exit_code = _run_with_pty(
             args, pty_workdir, timeout, environment, **runner_options
         )
-    except TimeoutError:
+    except (TimeoutError, LocalSupervisionTimeoutError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve the direct failure context.
         fallback_text = direct_stderr or f"agy produced no output; PTY fallback failed: {exc}"
@@ -504,7 +553,9 @@ def run_agy_visible(
         exit_code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         process.kill()
-        raise TimeoutError(f"agy timed out after {timeout}s") from exc
+        raise LocalSupervisionTimeoutError(
+            f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s"
+        ) from exc
 
     return AgyResult(
         text="Live agy output was shown in a separate terminal window.",
@@ -519,6 +570,7 @@ def _run_subprocess(
     env: Optional[dict[str, str]] = None,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
+    max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
 ) -> subprocess.CompletedProcess:
     kwargs: dict = {"cwd": workdir, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if env is not None:
@@ -527,12 +579,20 @@ def _run_subprocess(
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
     proc = subprocess.Popen(args, **kwargs)
     deadline = time.monotonic() + timeout
+    extensions = 0
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                if liveness_probe is None or not liveness_probe():
-                    raise TimeoutError(f"agy timed out after {timeout}s")
+                if (
+                    extensions >= max_liveness_extensions
+                    or liveness_probe is None
+                    or not liveness_probe()
+                ):
+                    raise LocalSupervisionTimeoutError(
+                        f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s"
+                    )
+                extensions += 1
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
             try:
@@ -540,7 +600,7 @@ def _run_subprocess(
                 return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
                 continue
-    except TimeoutError:
+    except (TimeoutError, LocalSupervisionTimeoutError):
         proc.kill()
         try:
             proc.communicate()
@@ -556,11 +616,28 @@ def _run_with_pty(
     env: Optional[dict[str, str]] = None,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
+    max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
 ) -> tuple[str, int]:
     """Run agy attached to a fresh pty so it believes stdout is a terminal."""
     if sys.platform == "win32":
-        return _run_with_conpty(args, workdir, timeout, env, liveness_probe, stall_grace_seconds)
-    return _run_with_posix_pty(args, workdir, timeout, env, liveness_probe, stall_grace_seconds)
+        return _run_with_conpty(
+            args,
+            workdir,
+            timeout,
+            env,
+            liveness_probe,
+            stall_grace_seconds,
+            max_liveness_extensions,
+        )
+    return _run_with_posix_pty(
+        args,
+        workdir,
+        timeout,
+        env,
+        liveness_probe,
+        stall_grace_seconds,
+        max_liveness_extensions,
+    )
 
 
 def _run_with_conpty(
@@ -570,6 +647,7 @@ def _run_with_conpty(
     env: Optional[dict[str, str]] = None,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
+    max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
 ) -> tuple[str, int]:
     try:
         from winpty import PtyProcess  # type: ignore
@@ -584,12 +662,20 @@ def _run_with_conpty(
     deadline = time.monotonic() + timeout
     completed = False
     exit_status: Optional[int] = None
+    extensions = 0
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                if liveness_probe is None or not liveness_probe():
-                    raise TimeoutError(f"agy timed out after {timeout}s")
+                if (
+                    extensions >= max_liveness_extensions
+                    or liveness_probe is None
+                    or not liveness_probe()
+                ):
+                    raise LocalSupervisionTimeoutError(
+                        f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s"
+                    )
+                extensions += 1
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
             fileobj = getattr(proc, "fileobj", None)
@@ -633,6 +719,7 @@ def _run_with_posix_pty(
     env: Optional[dict[str, str]] = None,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
+    max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
 ) -> tuple[str, int]:
     import pty
 
@@ -652,13 +739,21 @@ def _run_with_posix_pty(
 
     chunks: list[str] = []
     deadline = time.monotonic() + timeout
+    extensions = 0
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                if liveness_probe is None or not liveness_probe():
+                if (
+                    extensions >= max_liveness_extensions
+                    or liveness_probe is None
+                    or not liveness_probe()
+                ):
                     proc.kill()
-                    raise TimeoutError(f"agy timed out after {timeout}s")
+                    raise LocalSupervisionTimeoutError(
+                        f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s"
+                    )
+                extensions += 1
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
             ready, _, _ = select.select([master], [], [], min(1.0, remaining))
