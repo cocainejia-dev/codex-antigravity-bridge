@@ -6,6 +6,7 @@ import argparse
 from dataclasses import dataclass
 from enum import Enum
 import importlib
+import ntpath
 import json
 import os
 from pathlib import Path
@@ -71,8 +72,10 @@ _PROXY_ENV_NAMES = (
 
 
 def _normalize_path_str(path_str: str) -> str:
-    norm = os.path.normcase(os.path.normpath(path_str))
-    return norm
+    raw = str(path_str).replace("/", "\\")
+    if len(raw) >= 2 and raw[1] == ":":
+        return ntpath.normcase(ntpath.normpath(raw))
+    return os.path.normcase(os.path.normpath(path_str))
 
 
 def _paths_equal(path_a: str | Path, path_b: str | Path) -> bool:
