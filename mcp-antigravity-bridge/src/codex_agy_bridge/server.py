@@ -301,6 +301,7 @@ def run_start(
     base_head: str | None = None,
     attempt: int = 0,
     repair_round: int = 0,
+    dangerously_skip_permissions: bool = False,
 ) -> str:
     """Start a durable run tracking a VNext TaskContract specification.
 
@@ -319,6 +320,7 @@ def run_start(
         base_head=base_head,
         attempt=attempt,
         repair_round=repair_round,
+        dangerously_skip_permissions=dangerously_skip_permissions,
     )
 
 
@@ -333,6 +335,7 @@ def _run_start_impl(
     base_head: str | None = None,
     attempt: int = 0,
     repair_round: int = 0,
+    dangerously_skip_permissions: bool = False,
     *,
     worker_factory=None,
 ) -> str:
@@ -349,7 +352,13 @@ def _run_start_impl(
         raise ValueError("task must be a dictionary representing a TaskContract")
 
     contract = TaskContract.from_dict(task)
-    worker = worker_factory(contract)
+    if dangerously_skip_permissions:
+        worker = worker_factory(contract, dangerously_skip_permissions=True)
+    else:
+        worker = worker_factory(contract)
+    worker_identity = {
+        "dangerously_skip_permissions": bool(dangerously_skip_permissions),
+    }
     manager = DurableRunManager(valid_db_path)
     record = manager.run_start(
         contract,
@@ -362,6 +371,7 @@ def _run_start_impl(
         base_head=base_head or None,
         attempt=attempt,
         repair_round=repair_round,
+        worker_identity=worker_identity,
     )
     return json.dumps(record.to_dict(), ensure_ascii=False)
 
