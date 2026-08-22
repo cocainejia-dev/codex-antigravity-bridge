@@ -33,7 +33,12 @@ def _build_prompt(contract: TaskContract) -> str:
     )
 
 
-def build_worker_callback(contract: TaskContract, *, runner: Callable[..., Any] = run_agy) -> WorkerCallback:
+def build_worker_callback(
+    contract: TaskContract,
+    *,
+    runner: Callable[..., Any] = run_agy,
+    dangerously_skip_permissions: bool = False,
+) -> WorkerCallback:
     """Build one durable worker callback backed by the existing AGY primitive."""
     if not isinstance(contract, TaskContract):
         raise ValueError("contract must be a validated TaskContract")
@@ -42,11 +47,13 @@ def build_worker_callback(contract: TaskContract, *, runner: Callable[..., Any] 
 
     def _worker(context) -> WorkerResult:
         try:
-            result = runner(
-                prompt,
-                workdir=context.worktree or contract.workdir,
-                timeout=float(contract.max_runtime),
-            )
+            runner_kwargs = {
+                "workdir": context.worktree or contract.workdir,
+                "timeout": float(contract.max_runtime),
+            }
+            if dangerously_skip_permissions:
+                runner_kwargs["dangerously_skip_permissions"] = True
+            result = runner(prompt, **runner_kwargs)
         except Exception as exc:  # Worker lifecycle records the failure durably.
             return WorkerResult(success=False, last_error=str(exc))
 

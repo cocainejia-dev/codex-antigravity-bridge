@@ -464,6 +464,7 @@ def run_resume(
     run_id: str,
     account_switched: bool = False,
     credentials_refreshed: bool = False,
+    dangerously_skip_permissions: bool = False,
 ) -> str:
     """Resume one suspended durable run on its existing task and worktree."""
     valid_db_path = _validate_db_path(db_path)
@@ -482,7 +483,10 @@ def run_resume(
         contract = manager.store.get_task_contract(record.run_id)
         if contract is None:
             raise RunControlError(f"run_resume rejected: TaskContract is missing for {record.run_id}")
-        worker = build_worker_callback(contract)
+        worker = build_worker_callback(
+            contract,
+            dangerously_skip_permissions=dangerously_skip_permissions,
+        )
         resumed = RecoveryOrchestrator(manager).resume_same_run(
             record.run_id,
             worker=worker,

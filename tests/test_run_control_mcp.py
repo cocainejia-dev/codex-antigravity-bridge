@@ -42,7 +42,7 @@ from codex_agy_bridge.server import (
 def isolate_start_job_from_real_agy(monkeypatch):
     calls = []
 
-    def fake_factory(contract):
+    def fake_factory(contract, **kwargs):
         def fake_worker(context):
             calls.append(context.run_id)
             time.sleep(0.2)

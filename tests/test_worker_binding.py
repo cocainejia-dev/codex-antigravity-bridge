@@ -70,6 +70,23 @@ def test_callback_maps_contract_to_existing_runner(monkeypatch):
     assert kwargs == {}
 
 
+def test_callback_forwards_explicit_permission_bypass_only_when_authorized():
+    calls = []
+
+    def fake_runner(prompt, workdir, timeout, **kwargs):
+        calls.append(kwargs)
+        return AgyResult(text="ok", exit_code=0, used_pty=False)
+
+    contract = _contract()
+    build_worker_callback(
+        contract,
+        runner=fake_runner,
+        dangerously_skip_permissions=True,
+    )(_context(contract))
+
+    assert calls == [{"dangerously_skip_permissions": True}]
+
+
 def test_callback_factory_accepts_injected_runner_without_global_patch():
     calls = []
 
