@@ -798,9 +798,15 @@ def attest_source_provenance(
 ) -> dict[str, Any]:
     """Execute cold subprocess attestation checking codex_agy_bridge module resolution against expected_root."""
     attestation_script = (
-        "import json, sys, os\n"
+        "import json, sys, os, importlib.util\n"
         "res = {'interpreter': sys.executable, 'cwd': os.getcwd(), 'package_file': None, 'server_file': None}\n"
         "try:\n"
+        "    package_spec = importlib.util.find_spec('codex_agy_bridge')\n"
+        "    if package_spec is not None and package_spec.origin:\n"
+        "        res['package_file'] = os.path.abspath(package_spec.origin)\n"
+        "    server_spec = importlib.util.find_spec('codex_agy_bridge.server')\n"
+        "    if server_spec is not None and server_spec.origin:\n"
+        "        res['server_file'] = os.path.abspath(server_spec.origin)\n"
         "    import codex_agy_bridge\n"
         "    if hasattr(codex_agy_bridge, '__file__') and codex_agy_bridge.__file__:\n"
         "        res['package_file'] = os.path.abspath(codex_agy_bridge.__file__)\n"
