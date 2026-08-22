@@ -8,7 +8,7 @@
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
 - `CURRENT_PHASE`: `PHASE 11.5 / CI PACKAGING RELEASE CANDIDATE`.
-- `CURRENT_TASK`: `WAITING_FOR_SEPARATE_LIVE_AGY_AUTHORIZATION`.
+- `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
 - `STATE`: `WAITING_FOR_USER_DIRECTION`.
 - `LAST_VERIFIED_COMMIT`: `289923a` (Phase 11.5 deterministic/package gate verification).
 - R1 effective progress: PASS.
@@ -74,7 +74,11 @@
 - Fresh-client runtime acceptance: PASS (fresh controller smoke and one
   disposable durable async acceptance).
 - MCP runtime cutover: PASS.
-- `NEXT_SAFE_ACTION`: `WAIT_FOR_SEPARATE_LIVE_AGY_AUTHORIZATION`.
+- `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
+- `PHASE11_5_TECHNICAL_RC`: PASS.
+- `READY_FOR_GITHUB_PUBLICATION`: YES (publication remains Phase 11.6A).
+- `GITHUB_HOSTED_CI`: PENDING_PHASE11_6A.
+- `LIVE_AGY_RC_ACCEPTANCE`: PASS.
 
 ## Verification
 

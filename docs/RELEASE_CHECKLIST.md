@@ -13,6 +13,12 @@
 - [ ] Run source, artifact, CI, and private-data secret scans.
 - [ ] Review scope and risk, then create one controller-owned commit.
 
+## Live RC acceptance
+
+- [x] Direct default-account AGY smoke passed.
+- [x] Exactly one durable no-write AGY job passed.
+- [x] No retry, replacement worker, duplicate worker, or repository diff.
+
 Live account-authenticated AGY acceptance is a separate, explicitly authorized
 step. It is not a public CI dependency and must not run during deterministic
 CI or package verification.

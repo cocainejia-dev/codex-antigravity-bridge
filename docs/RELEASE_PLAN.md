@@ -47,6 +47,9 @@ project status, not a live runtime process list or durable job database state.
   sdist builds, artifact installation/import, and package hygiene.
 - Live AGY acceptance is intentionally deferred until deterministic and package
   gates are independently accepted.
+- Final account-authenticated live RC acceptance passed exactly one direct
+  smoke and one durable no-write job; no retry or replacement worker was used.
+- Phase 11.5 Technical RC: PASS. GitHub Hosted CI remains pending Phase 11.6A.
 - GitHub publication, tagging, release creation, and package upload remain
   forbidden in this phase.
 
