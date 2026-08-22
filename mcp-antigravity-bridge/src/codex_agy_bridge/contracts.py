@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import json
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
@@ -238,9 +238,8 @@ def validate_no_credentials(val: Any, field_name: str = "") -> None:
 
 def normalize_path(p: str | Path) -> str:
     """Normalize a path to a clean POSIX representation."""
-    if isinstance(p, Path):
-        return p.as_posix()
-    return Path(str(p)).as_posix()
+    raw = p.as_posix() if isinstance(p, Path) else str(p)
+    return PurePosixPath(raw.replace("\\", "/")).as_posix()
 
 
 def normalize_paths(paths: list[str | Path] | tuple[str | Path, ...] | None) -> list[str]:
