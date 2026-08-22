@@ -78,14 +78,34 @@ python -m pip install -e ".\mcp-antigravity-bridge[dev,winpty]"
 codex-agy-bridge-setup --what-if
 ```
 
-Complete an interactive login before the real connectivity check:
+### Interactive login and Doctor check
 
 ```powershell
 agy --version
 agy
 agy -p "Reply exactly AGY_OK"
 codex mcp list
+codex-agy-bridge doctor
 ```
+
+Once `AGY_OK` is returned and `codex-agy-bridge` appears in your MCP list, the bridge is ready.
+
+### Codex trigger and delegation
+
+Instruct Codex clearly to delegate tasks or initiate collaboration:
+
+- **Bounded task delegation**: "Enable supervisor mode. Delegate bounded implementation of module X to Antigravity with owned_paths=[...]."
+- **Parallel multi-track collaboration**: Ask Codex to run collaboration mode; it will partition frontend/backend tasks and invoke `agy_collab_start`.
+
+### Quota switch and account resumption
+
+When hitting rate limits or quota exhaustion:
+
+1. The durable supervisor transitions the run to `ACCOUNT_SWITCH_REQUIRED`, **preserving the entire worktree and uncommitted progress**.
+2. Run `agy` in your terminal to perform an interactive login/account switch.
+3. Call `run_resume(db_path, run_id, account_switched=True)` to resume the run in-place on the same worktree without losing work.
+
+### Proxy configuration
 
 Use `AGY_PROXY_URL`, `PROXY_URL`, or `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`
 for a proxy. An explicit setup proxy can be passed as
@@ -161,14 +181,32 @@ means only that the process exited successfully; it is not acceptance proof.
 
 ## Tools
 
+The bridge provides a layered MCP tool architecture separating basic agy delegation tools from durable supervisor/recovery tools:
+
+### Basic Delegation Tools (`agy_*`)
+
 | Tool | Purpose |
 | --- | --- |
-| `agy_ask` | One bounded synchronous CLI task |
+| `agy_ask` | One bounded synchronous CLI task (`agy -p`) |
 | `agy_ask_json` | One task with validated JSON output |
 | `agy_start` | Async work in a caller-created isolated worktree |
 | `agy_status` | Poll an async job |
+| `agy_wait` | Bounded wait for async task completion without cancelling |
+| `agy_jobs_recent` | Inspect recent async task history |
 | `agy_collab_start` | Validate a contract and start up to four isolated tasks |
 | `agy_collab_status` | Aggregate task results and changed-file scope audits |
+
+### Durable Supervisor & Recovery Tools (`run_*`)
+
+| Tool | Purpose |
+| --- | --- |
+| `run_start` | Start a durable run tracking a `TaskContract` (persists `CREATED` record in SQLite `db_path`, auto-spawns bounded worker) |
+| `run_status` | Inspect durable `RunRecord` JSON from SQLite |
+| `run_observe` | Check process/heartbeat liveness and expose recovery state (`is_alive`, `is_stale`, `recovery_state`) |
+| `run_wait` | Wait for a run to reach a terminal state within a bounded timeout without cancelling |
+| `run_result` | Retrieve terminal result evidence (raises error if non-terminal) |
+| `run_cancel` | Cooperatively request cancellation for a run |
+| `run_resume` | Resume a suspended durable run on its existing task and worktree after an account switch or credential refresh |
 
 ## Security and limits
 
@@ -185,13 +223,7 @@ for a reproducible dry-run and live-demo checklist.
 
 ## Release status
 
-Version `0.1.0` has completed stabilization and clean-room acceptance and is in
-the Phase 11.5 CI and packaging release-candidate process. The authoritative
-version lives in `mcp-antigravity-bridge/pyproject.toml`; package imports read
-installed metadata and do not maintain a second release constant. Deterministic
-CI does not require an Antigravity account, Google AI Pro, or any API key.
-Package-index publication and release-candidate tagging remain out of scope.
-See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+Version `0.1.0` has passed OPERATIONAL_MVP verification and technical hardening, backed by 354 automated tests and deterministic CI. The authoritative version lives in `mcp-antigravity-bridge/pyproject.toml`; package imports read installed metadata and do not maintain a second release constant. Deterministic CI does not require an Antigravity account, Google AI Pro, or any API key. See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
 
 ## Development
 

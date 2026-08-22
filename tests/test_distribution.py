@@ -65,7 +65,7 @@ def test_validator_passes() -> None:
 def test_readme_documents_install_and_supervision() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for phrase in (
-        "https://github.com/crazyzhang277/codex-antigravity-bridge.git",
+        "https://github.com/cocainejia-dev/codex-antigravity-bridge.git",
         "agy_ask",
         "agy_start",
         "agy_status",

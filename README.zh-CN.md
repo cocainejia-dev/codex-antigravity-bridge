@@ -5,7 +5,7 @@
 ### 一个把 Codex 的判断力与 `agy` 的执行力接起来的本地 MCP 桥接器
 
 <p>
-  <a href="https://github.com/crazyzhang277/codex-antigravity-bridge"><img src="https://img.shields.io/badge/status-active-16a34a?style=for-the-badge" alt="项目状态：可用"></a>
+  <a href="https://github.com/cocainejia-dev/codex-antigravity-bridge"><img src="https://img.shields.io/badge/status-active-16a34a?style=for-the-badge" alt="项目状态：可用"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10 及以上"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-local%20stdio-111827?style=for-the-badge" alt="本地 MCP stdio"></a>
   <a href="https://github.com/google-antigravity/antigravity-cli"><img src="https://img.shields.io/badge/Antigravity-agy%20CLI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Antigravity agy 命令行"></a>
@@ -128,7 +128,7 @@ Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
 <td width="25%"><strong>原生接入</strong><br><sub>注册为 MCP 服务器，Codex 桌面版和命令行都能直接调用。</sub></td>
 <td width="25%"><strong>命令行优先</strong><br><sub>复用 `agy` 自己的登录、工作区和权限流程。</sub></td>
 <td width="25%"><strong>Windows 友好</strong><br><sub>支持中文路径，并在空输出时尝试 ConPTY 回退。</sub></td>
-<td width="25%"><strong>小而清楚</strong><br><sub>本地 stdio、六个工具，没有网页服务器和数据库。</sub></td>
+<td width="25%"><strong>小而清楚</strong><br><sub>本地 stdio、分层 MCP 工具集（基础委派与持久化监督），轻量无后台常驻服务。</sub></td>
 </tr>
 </table>
 
@@ -207,14 +207,30 @@ agy
 
 按照交互式提示完成登录。macOS / Linux 请参考 [Antigravity CLI 文档](https://antigravity.google/docs/cli/overview)。
 
-### 04 · 验证连接
+### 04 · 验证连接与健康检查 (Doctor)
 
 ```powershell
 agy -p "Reply exactly AGY_OK"
 codex mcp list
+codex-agy-bridge doctor
 ```
 
-看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，就可以在 Codex 中使用它。
+看到 `AGY_OK`，并在 MCP 列表中看到 `codex-agy-bridge`，即表示连接与环境正常。
+
+### 05 · Codex 触发与受控委派
+
+在 Codex 中可以直接通过明确指令触发 Antigravity 监督模式或协同模式：
+
+- **单任务受控委派**：告知 Codex “开启 supervisor mode，受控委派 Antigravity 实现 XX 功能”，Codex 会明确限定 `owned_paths` 范围与验证命令，并通过 `agy_ask`、`agy_start` 或 `run_start` 执行。
+- **多模块并行协同**：告知 Codex 启用协同模式，Codex 将自动拆分前后端互斥子任务并通过 `agy_collab_start` 并行启动隔离 worktree。
+
+### 06 · 配额耗尽与账号切换恢复
+
+当 Antigravity 遇到模型限流或配额耗尽时：
+
+1. 持久化监督器将任务标记为 `ACCOUNT_SWITCH_REQUIRED` 挂起状态，并**完整保留当前 worktree 与全部代码改动**；
+2. 用户在终端运行 `agy` 进行交互式切换或登录可用账号；
+3. 切换完成后，Codex 调用 `run_resume(db_path, run_id, account_switched=True)` 即可在原 worktree 自动恢复执行，无需重置或重新开始。
 
 ### 代理与登录行为
 
@@ -243,24 +259,42 @@ powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
 
 ## Release status
 
-`0.1.0` 已完成稳定化和 clean-room 验收，当前处于 Phase 11.4 release
-hardening。CI、构建产物、包索引发布和 release candidate 标记留到 Phase 11.5，
-当前尚未发布到包索引。详见 [发布加固清单](docs/RELEASE_HARDENING.md)。
+`0.1.0` 已通过 OPERATIONAL_MVP 验收与技术加固，包含 354 项自动化测试与确定性 CI。详见 [发布加固清单](docs/RELEASE_HARDENING.md)。
 
 <a id="tools"></a>
 
-## 🧰 六个工具
+## 🧰 MCP 工具体系
+
+本项目提供两层清晰解耦的本地 MCP 工具体系：**基础 `agy` 委派工具**（单次/多任务快速委派）与 **持久化监督与恢复工具**（VNext 生产级状态机与韧性控制）。
+
+### 1. 基础 `agy` 委派工具
 
 | 工具 | 作用 | 返回 |
 | --- | --- | --- |
-| `agy_ask` | 同步执行一次受控 CLI 任务 | 清理后的文本 |
-| `agy_ask_json` | 请求结构化 CLI 输出，并拒绝非法 JSON | JSON 输出文本 |
+| `agy_ask` | 同步执行一次受控 CLI 任务 (`agy -p`) | 清理后的文本 |
+| `agy_ask_json` | 请求结构化 CLI 输出，严格校验并拒绝非法 JSON | JSON 输出文本 |
 | `agy_start` | 在调用方提供的独立 worktree 中异步启动任务 | `job_id` |
-| `agy_status` | 查询异步任务 | 状态与结果 JSON |
-| `agy_collab_start` | 按任务契约自动创建 worktree 并并行启动任务 | 协同会话 JSON |
-| `agy_collab_status` | 汇总任务、工作区和差异状态 | 协同会话 JSON |
+| `agy_status` | 查询异步任务状态与结果 | 状态与结果 JSON |
+| `agy_wait` | 在有界超时时间内等待异步任务完成（不取消任务） | 状态与结果 JSON |
+| `agy_jobs_recent` | 查看最近异步任务历史记录摘要（支持状态/task_key 过滤） | 任务记录 JSON |
+| `agy_collab_start` | 按任务契约自动创建独立 worktree 并并行启动最多 4 个任务 | 协同会话 JSON |
+| `agy_collab_status` | 汇总协同任务、工作区和范围审计状态 | 协同会话 JSON |
 
-所有公开任务工具都会在启动进程或 job 前拒绝非正数和非有限的 `timeout`。普通工具默认超时为 `300.0` 秒，`agy_collab_start` 默认超时为 `900.0` 秒。
+### 2. 持久化监督与恢复工具 (VNext Durable Supervisor)
+
+基于本地 SQLite (`db_path`) 与显式 `TaskContract`，提供具备状态机、存活检测和账号切换断点恢复的监督控制：
+
+| 工具 | 作用 | 返回 |
+| --- | --- | --- |
+| `run_start` | 启动持久化运行，持久化 `CREATED` 状态记录并拉起有界 worker | 运行记录 JSON |
+| `run_status` | 从数据库读取指定 `run_id` 的持久化 `RunRecord` | 运行记录 JSON |
+| `run_observe` | 观察运行状态、进程与心跳存活度（`is_alive` / `is_stale` / `recovery_state`） | 观察详情 JSON |
+| `run_wait` | 在有界超时时间内等待运行达到终态（超时不取消任务） | 运行记录 JSON |
+| `run_result` | 获取终态证据结果（非终态调用时抛出错误） | 运行记录 JSON |
+| `run_cancel` | 协作式请求取消运行（写入 `CANCELLED` 终态） | 运行记录 JSON |
+| `run_resume` | 在账号切换或凭证刷新后，在原 worktree 和契约上恢复挂起的运行 | 恢复后记录 JSON |
+
+所有公开任务工具都会在启动进程或 job 前拒绝非正数和非有限的 `timeout` 与参数。普通工具默认超时为 `300.0` 秒，`agy_collab_start` 默认超时为 `900.0` 秒。
 
 ## 🤝 协同开发模式 MVP
 

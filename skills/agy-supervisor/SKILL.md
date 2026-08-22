@@ -7,7 +7,7 @@ description: Use when the user explicitly asks Codex to involve Antigravity, agy
 
 ## Normal mode
 
-Do not call `agy_ask`, `agy_ask_json`, `agy_start`, or `agy_collab_start` during ordinary
+Do not call delegation or durable run tools (such as `agy_ask`, `agy_ask_json`, `agy_start`, `agy_collab_start`, or `run_start`) during ordinary
 development. Use delegation only when the user explicitly asks for Antigravity
 involvement or explicitly opts into Supervisor mode.
 
@@ -17,8 +17,8 @@ Use this sequence:
 
 1. Inspect the repository and requested scope.
 2. Define the workdir, risk class, authorization, and exclusive file ownership.
-3. Build the required delegation prompt and choose the permission mode.
-4. Call `agy_ask`, `agy_ask_json`, `agy_start`, or the collaboration MVP.
+3. Build the required delegation prompt / TaskContract and choose the permission mode.
+4. Call `agy_ask`, `agy_ask_json`, `agy_start`, `agy_collab_start`, or `run_start` (for durable runs).
 5. Inspect status, diff, worktree boundaries, output, and tests.
 6. Accept only a verified success; otherwise make at most two evidence-based
    corrective calls, then stop with the exact blocker.
@@ -30,16 +30,24 @@ machine, lifecycle checklist, correction protocol, and pressure cases are in
 [`references/agy-supervisor-protocol.md`](references/agy-supervisor-protocol.md).
 Parallel worktree plans live under `docs/agy-plans/` and start with
 `Status: READY_FOR_AGY`; create and validate the caller-owned AGY worktree,
-pass it as `workdir` to `agy_start`, and inspect `git worktree list` before and
+pass it as `workdir` to `agy_start` or `run_start`, and inspect `git worktree list` before and
 after delegation. The bridge does not create worktrees for `agy_start`.
 
 ### Tool and output rules
 
-- Apply the same scope and permission contract to `agy_ask`, `agy_ask_json`,
-  `agy_start`, and `agy_collab_start`; `agy_ask_json` additionally requires parseable JSON matching the
-  requested output schema.
-- `agy_start` requires an existing caller-created isolated worktree as `workdir`;
-  an empty or non-directory workdir is rejected.
+- **Basic agy delegation tools**:
+  - `agy_ask`: synchronous bounded CLI task (`agy -p`).
+  - `agy_ask_json`: structured JSON output with schema validation, parseable JSON, and the requested output schema.
+  - `agy_start`: async task in a caller-created isolated worktree (`workdir`); rejected if workdir is missing.
+  - `agy_status` / `agy_wait`: poll or bounded-wait for async task completion.
+  - `agy_jobs_recent`: inspect recent async task history.
+  - `agy_collab_start` / `agy_collab_status`: multi-task collaboration creating separate worktrees for up to 4 tasks.
+- **Durable supervisor & recovery tools (`run_*`)**:
+  - `run_start`: persists `CREATED` state and `TaskContract` in SQLite `db_path`, auto-spawning a bounded worker.
+  - `run_status` / `run_observe` / `run_wait`: inspect durable `RunRecord`, check heartbeat and process liveness, and wait for terminal states.
+  - `run_result`: retrieves verified terminal results (rejected if non-terminal).
+  - `run_cancel`: cooperatively requests run cancellation.
+  - `run_resume`: resumes a suspended run (e.g. `ACCOUNT_SWITCH_REQUIRED`) on its existing worktree and contract after account switch or credential refresh.
 - `dangerously_skip_permissions=false` is the default. Enable it only after
   explicit authorization for the exact trusted worktree and task.
 - `agy_status` may report `queued`, `running`, `completed`, `failed`, or

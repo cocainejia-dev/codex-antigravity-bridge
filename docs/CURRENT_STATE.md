@@ -7,10 +7,11 @@
 - `RUNTIME_RESOLVED_HEAD`: discover at startup; do not write the containing
   commit hash into the recovery anchor.
 - `CURRENT_BRANCH`: `main`.
-- `CURRENT_PHASE`: `PHASE 11.5 / CI PACKAGING RELEASE CANDIDATE`.
+- `CURRENT_PHASE`: `OPERATIONAL_MVP`.
 - `CURRENT_TASK`: `WAITING_FOR_USER_DIRECTION`.
-- `STATE`: `WAITING_FOR_USER_DIRECTION`.
-- `LAST_VERIFIED_COMMIT`: `289923a` (Phase 11.5 deterministic/package gate verification).
+- `STATE`: `OPERATIONAL_MVP_VERIFIED`.
+- `LAST_VERIFIED_COMMIT`: discover at startup from `RUNTIME_RESOLVED_HEAD`.
+- `OPERATIONAL_MVP`: PASS.
 - R1 effective progress: PASS.
 - W1 timeout/liveness semantics: PASS.
 - R2 source provenance: PASS.
@@ -33,24 +34,19 @@
 - `READY_FOR_R3`: YES.
 - `PHASE11_3_CLEANROOM_E2E`: PASS.
 - `CLEANROOM_ENV_INSTALL`: PASS.
-- `CLEANROOM_VERIFY_BASELINE`: PASS (`281 passed, 1 warning`).
-- `THREE_CONSECUTIVE_ROUNDS`: PASS; disposable acceptance commits remained in
-  the clean-room branch and were not merged to `main`.
 - `COLD_START_RECOVERY`: PASS.
 - `CONVERSATION_CONTEXT_REQUIRED`: NO.
 - `DUPLICATE_WORKER`: 0.
 - `EXACTLY_ONE_HARVEST_PER_ROUND`: PASS.
-- `FINAL_FULL_VERIFY`: PASS in the clean-room (`284 passed, 1 warning`).
-- `READY_FOR_RELEASE_HARDENING`: YES.
 - `PHASE11_4_TECHNICAL_HARDENING`: PASS.
 - `PHASE11_4_RELEASE_HARDENING`: PASS.
-- `READY_FOR_PHASE11_5_RC`: YES.
 - `VERSION_SOURCE_OF_TRUTH`: `mcp-antigravity-bridge/pyproject.toml`.
 - `VERSION_CONFLICT`: `NO`.
-- `LIVE_AGY_SMOKE`: `FORBIDDEN_UNTIL_SEPARATE_AUTHORIZATION`.
+- `API_KEY_MODE`: `NO`.
+- `ACCOUNT_SWITCH_PRESERVATION`: PASS.
+- `LIVE_AGY_CROSS_ACCOUNT`: PASS.
 - `FRESH_CLONE`: PASS.
-- `FRESH_ENV_INSTALL`: PASS.
-- `FULL_PYTEST`: PASS (`288 passed, 1 warning`).
+- `FULL_PYTEST`: PASS (`354 passed, 1 warning`).
 - `RUFF_CHANGED_SCOPE`: PASS.
 - `COMPILEALL`: PASS.
 - `WHEEL_BUILD`: PASS.
@@ -58,7 +54,8 @@
 - `ARTIFACT_INSTALL_IMPORT`: PASS.
 - `ARTIFACT_HYGIENE`: PASS.
 - `LOCAL_CI_EQUIVALENT`: PASS.
-- `NEXT_RECOMMENDED_TASK`: `PHASE11.5_CI_PACKAGING_RELEASE_CANDIDATE`.
+- `HOSTED_CI`: PASS.
+- `NEXT_RECOMMENDED_TASK`: `OPERATIONAL_MVP_MAINTENANCE`.
 
 ## Repository Roles
 
@@ -74,11 +71,13 @@
 - Fresh-client runtime acceptance: PASS (fresh controller smoke and one
   disposable durable async acceptance).
 - MCP runtime cutover: PASS.
-- `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
-- `PHASE11_5_TECHNICAL_RC`: PASS.
-- `READY_FOR_GITHUB_PUBLICATION`: YES (publication remains Phase 11.6A).
-- `GITHUB_HOSTED_CI`: PENDING_PHASE11_6A.
+- `OPERATIONAL_MVP`: PASS.
+- `API_KEY_MODE`: `NO`.
+- `ACCOUNT_SWITCH_PRESERVATION`: PASS.
+- `LIVE_AGY_CROSS_ACCOUNT`: PASS.
+- `GITHUB_HOSTED_CI`: PASS.
 - `LIVE_AGY_RC_ACCEPTANCE`: PASS.
+- `NEXT_SAFE_ACTION`: `WAIT_FOR_USER_DIRECTION`.
 
 ## Verification
 
@@ -90,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 ```
 
-R3 fresh-environment acceptance produced `281 passed, 1 warning`, Ruff
+Verification suite produces `354 passed, 1 warning`, Ruff
 `0.16.4`, compileall PASS, source provenance PASS, and diff-check PASS. The
 warning is the existing `pydantic_settings` incomplete forward-reference
 warning. The authoritative entrypoint is `scripts/verify.ps1`; it defaults to

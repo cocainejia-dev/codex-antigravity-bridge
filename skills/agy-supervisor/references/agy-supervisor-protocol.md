@@ -34,10 +34,10 @@ The permission flag defaults to false for every task class.
 
 ## Delegation Prompt Template
 
-Use every field for `agy_ask`, `agy_ask_json`, and `agy_start`:
+Use every field for `agy_ask`, `agy_ask_json`, `agy_start`, or `run_start`:
 
 ```text
-Tool: <agy_ask|agy_ask_json|agy_start>
+Tool: <agy_ask|agy_ask_json|agy_start|run_start>
 Task scope: <one bounded task and expected outcome>
 Owned files: <files AGY may create or modify, or none>
 Forbidden files: <files and operations AGY must not touch>
@@ -62,6 +62,7 @@ Classify the raw result before reporting it:
 | `succeeded` | Usable output, acceptable exit code, no permission/authentication error, acceptance criteria pass. | Audit status, diff, worktree, and tests, then report verified success. |
 | `permission_blocked` | Permission denial, auto-denial, or permission-caused `no output produced`, including exit code 0. | Preserve scope; request exact authorization before retrying. |
 | `authentication_blocked` | Login, credential, or authentication failure. | Stop and ask for interactive authentication. |
+| `account_switch_required` | Model quota exhaustion or rate limit encountered. | Preserve worktree and code changes; prompt user for interactive `agy` account switch, then call `run_resume`. |
 | `empty_output` | No usable output and no more specific blocker. | Inspect the runner/PTY path; do not infer success. |
 | `invalid_output` | `agy_ask_json` returns unparsable JSON or violates the requested schema. | Treat as failed; issue only a bounded corrective call when justified. |
 | `timed_out` | Hard timeout reached. | Preserve the worktree; narrow scope or request a longer timeout. |
