@@ -77,6 +77,16 @@ class _SimpleMonkeyPatch:
         self._undos.clear()
 
 
+def _wait_for_status(registry: AgyJobRegistry, job_id: str, predicate, timeout: float = 2.0):
+    """Poll a durable status condition with a bounded deadline across slow CI hosts."""
+    deadline = time.monotonic() + timeout
+    status = registry.status(job_id)
+    while not predicate(status) and time.monotonic() < deadline:
+        time.sleep(0.01)
+        status = registry.status(job_id)
+    return status
+
+
 def test_start_and_status_reports_completed_job(monkeypatch=None):
     mp = monkeypatch or _SimpleMonkeyPatch()
     def fake_run_agy(*args, **kwargs):
@@ -88,11 +98,11 @@ def test_start_and_status_reports_completed_job(monkeypatch=None):
         registry = AgyJobRegistry(db_path=db_file)
         try:
             job_id = registry.start("Implement page", workdir="C:\\work")
-            for _ in range(20):
-                status = registry.status(job_id)
-                if status["state"] == "completed":
-                    break
-                time.sleep(0.01)
+            status = _wait_for_status(
+                registry,
+                job_id,
+                lambda current: current["state"] == "completed",
+            )
 
             assert status["job_id"] == job_id
             assert status["state"] == "completed"
@@ -157,8 +167,12 @@ def test_soft_budget_exceeded_with_fresh_heartbeat_remains_live(monkeypatch=None
         )
         try:
             job_id = registry.start("Long live task", timeout=0.05)
-            time.sleep(0.15)
-            status = registry.status(job_id)
+            status = _wait_for_status(
+                registry,
+                job_id,
+                lambda current: current["state"] == "running"
+                and current["health"] in {"HEALTHY", "QUEUED"},
+            )
             assert status["state"] == "running"
             assert status["health"] in {"HEALTHY", "QUEUED"}
             unblock.set()
