@@ -432,14 +432,43 @@ class AgyJobRegistry:
             self._prune_locked()
 
         # Atomically reserve and record in durable journal
-        self._store.reserve_and_create(
-            job_id=job_id,
-            task_key=task_key,
-            workdir=workdir,
-            prompt_hash=prompt_hash,
-            owner_session_id=self.bridge_session_id,
-            now_iso=now_iso,
-        )
+        try:
+            self._store.reserve_and_create(
+                job_id=job_id,
+                task_key=task_key,
+                workdir=workdir,
+                prompt_hash=prompt_hash,
+                owner_session_id=self.bridge_session_id,
+                now_iso=now_iso,
+            )
+        except RuntimeError as exc:
+            if "DUPLICATE_ACTIVE_TASK" in str(exc):
+                try:
+                    from .telemetry_hooks import (
+                        record_avoided_duplicate_retry_event,
+                        record_duplicate_quota_risk_event,
+                        telemetry_path_for,
+                    )
+
+                    telemetry_db = telemetry_path_for(self._store.db_path)
+                    metadata = {"task_key": task_key, "job_id": job_id}
+                    record_duplicate_quota_risk_event(
+                        run_id=job_id,
+                        project_dir=workdir,
+                        reason="duplicate active task rejected",
+                        metadata=metadata,
+                        db_path=telemetry_db,
+                    )
+                    record_avoided_duplicate_retry_event(
+                        run_id=job_id,
+                        project_dir=workdir,
+                        reason="duplicate active task guard",
+                        metadata=metadata,
+                        db_path=telemetry_db,
+                    )
+                except Exception:
+                    pass
+            raise
 
         try:
             from .telemetry_hooks import record_agy_job_start_event, telemetry_path_for

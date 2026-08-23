@@ -686,3 +686,25 @@ def test_duplicate_quota_hooks_failsafe():
 
         res_avoided = record_avoided_duplicate_retry_event(run_id="r1", reason="avoided")
         assert res_avoided is None
+
+
+def test_duplicate_active_task_records_derived_avoidance(tmp_path: Path, monkeypatch):
+    telemetry_db = tmp_path / "telemetry.sqlite3"
+    monkeypatch.setenv("CODEX_AGY_TELEMETRY_DB", str(telemetry_db))
+    registry = AgyJobRegistry(db_path=tmp_path / "jobs.sqlite3", max_workers=1)
+    blocker = threading.Event()
+
+    def blocked_runner(*args, **kwargs):
+        assert blocker.wait(timeout=5.0)
+        return AgyResult(text="done", exit_code=0)
+
+    monkeypatch.setattr("codex_agy_bridge.agy_jobs.run_agy", blocked_runner)
+    registry.start("first", workdir=str(tmp_path), task_key="same-task")
+    with pytest.raises(RuntimeError, match="DUPLICATE_ACTIVE_TASK"):
+        registry.start("duplicate", workdir=str(tmp_path), task_key="same-task")
+
+    ledger = get_telemetry_ledger(telemetry_db)
+    assert len(ledger.query(measurement_type="duplicate_quota_risks")) == 1
+    assert len(ledger.query(measurement_type="avoided_duplicate_retries")) == 1
+    blocker.set()
+    registry.close()
