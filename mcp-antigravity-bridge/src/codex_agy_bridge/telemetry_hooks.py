@@ -873,6 +873,78 @@ def record_oneshot_call_event(
     return events
 
 
+def record_duplicate_quota_risk_event(
+    run_id: str | None = None,
+    task_id: str | None = None,
+    project_dir: str | Path | None = None,
+    reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    db_path: str | Path | None = None,
+) -> UsageEvent | None:
+    """Record an observational duplicate quota risk event (DERIVED source, no token savings claimed)."""
+    try:
+        ledger = get_telemetry_ledger(db_path)
+        meta = dict(metadata or {})
+        meta["lifecycle_phase"] = "duplicate_quota_risk"
+        if reason:
+            meta["reason"] = str(reason)[:200]
+        meta["observational_basis"] = "derived_risk_observation"
+        meta["savings_claimed"] = False
+
+        return ledger.record_event(
+            actor="bridge",
+            event_type="duplicate_quota_risk",
+            measurement_type="duplicate_quota_risks",
+            value=1.0,
+            unit="count",
+            measurement_source=MeasurementSource.DERIVED,
+            confidence=DEFAULT_SOURCE_CONFIDENCE.get(MeasurementSource.DERIVED, 0.9),
+            run_id=run_id,
+            task_id=task_id,
+            project_dir=project_dir,
+            metadata=meta,
+        )
+    except Exception as err:
+        logger.warning("record_duplicate_quota_risk_event failed (best-effort suppressed): %s", err)
+        return None
+
+
+def record_avoided_duplicate_retry_event(
+    run_id: str | None = None,
+    task_id: str | None = None,
+    project_dir: str | Path | None = None,
+    reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    db_path: str | Path | None = None,
+) -> UsageEvent | None:
+    """Record an observational avoided duplicate retry event (DERIVED source, no token savings claimed)."""
+    try:
+        ledger = get_telemetry_ledger(db_path)
+        meta = dict(metadata or {})
+        meta["lifecycle_phase"] = "avoided_duplicate_retry"
+        if reason:
+            meta["reason"] = str(reason)[:200]
+        meta["observational_basis"] = "derived_avoided_retry"
+        meta["savings_claimed"] = False
+
+        return ledger.record_event(
+            actor="bridge",
+            event_type="avoided_duplicate_retry",
+            measurement_type="avoided_duplicate_retries",
+            value=1.0,
+            unit="count",
+            measurement_source=MeasurementSource.DERIVED,
+            confidence=DEFAULT_SOURCE_CONFIDENCE.get(MeasurementSource.DERIVED, 0.9),
+            run_id=run_id,
+            task_id=task_id,
+            project_dir=project_dir,
+            metadata=meta,
+        )
+    except Exception as err:
+        logger.warning("record_avoided_duplicate_retry_event failed (best-effort suppressed): %s", err)
+        return None
+
+
 __all__ = [
     "get_telemetry_ledger",
     "reset_telemetry_ledgers",
@@ -888,4 +960,6 @@ __all__ = [
     "record_agy_job_start_event",
     "record_agy_job_completion_event",
     "record_oneshot_call_event",
+    "record_duplicate_quota_risk_event",
+    "record_avoided_duplicate_retry_event",
 ]

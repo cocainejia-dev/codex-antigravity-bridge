@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="output deterministic JSON instead of human-formatted report",
     )
+    parser.add_argument(
+        "--html",
+        dest="html_path",
+        default=None,
+        help="generate lightweight stdlib-only HTML visualization report to specified path",
+    )
     return parser
 
 
@@ -138,6 +144,36 @@ def build_usage_report_data(
         e for e in events if e.measurement_type == "account_switches" or e.event_type == "account_switch_required"
     ]
     switches_count = int(summary.totals_by_measurement_type.get("account_switches", {}).get("count", len(switch_events)))
+
+    # Duplicate quota metrics
+    risk_events = [
+        e for e in events
+        if e.measurement_type == "duplicate_quota_risks"
+        or e.event_type == "duplicate_quota_risk"
+    ]
+    risk_count = int(
+        summary.totals_by_measurement_type.get("duplicate_quota_risks", {}).get("count", len(risk_events))
+    )
+
+    avoided_events = [
+        e for e in events
+        if e.measurement_type == "avoided_duplicate_retries"
+        or e.event_type == "avoided_duplicate_retry"
+    ]
+    avoided_count = int(
+        summary.totals_by_measurement_type.get("avoided_duplicate_retries", {}).get("count", len(avoided_events))
+    )
+
+    duplicate_quota_metrics = {
+        "risk_count": risk_count,
+        "avoided_count": avoided_count,
+        "source": MeasurementSource.DERIVED.value,
+        "statement": (
+            "Duplicate quota risk and avoided duplicate retry counts are DERIVED observational metrics. "
+            "No token savings or synthetic cost discount claims are made."
+        ),
+        "events": [e.to_dict() for e in (risk_events + avoided_events)],
+    }
 
     # Attribution: DERIVED/ESTIMATED strictly on recorded measurable workload
     attribution_workload = {
@@ -200,6 +236,7 @@ def build_usage_report_data(
             "total_count": switches_count,
             "events": [e.to_dict() for e in switch_events],
         },
+        "duplicate_quota_metrics": duplicate_quota_metrics,
         "confidence": {
             "mean_confidence": summary.mean_confidence,
             "weighted_confidence_by_unit": summary.weighted_confidence_by_unit,
@@ -223,6 +260,7 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     - RETRIES
     - TIMEOUTS
     - ACCOUNT_SWITCHES
+    - DUPLICATE_QUOTA_METRICS
     - CONFIDENCE
     - SOURCE
     """
@@ -234,6 +272,7 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     retries = report_data.get("retries", {})
     timeouts = report_data.get("timeouts", {})
     switches = report_data.get("account_switches", {})
+    dup_metrics = report_data.get("duplicate_quota_metrics", {})
     confidence = report_data.get("confidence", {})
     sources = report_data.get("sources", {})
 
@@ -333,7 +372,17 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     lines.append(f"  Total Switches:      {as_count} count")
     lines.append("")
 
-    # 9. CONFIDENCE
+    # 9. DUPLICATE_QUOTA_METRICS
+    lines.append("DUPLICATE_QUOTA_METRICS:")
+    dup_risk = dup_metrics.get("risk_count", 0)
+    dup_avoided = dup_metrics.get("avoided_count", 0)
+    dup_source = dup_metrics.get("source", "DERIVED")
+    lines.append(f"  Duplicate Quota Risks:     {dup_risk} count")
+    lines.append(f"  Avoided Duplicate Retries: {dup_avoided} count")
+    lines.append(f"  Source:                    {dup_source} (Observational; no token savings claimed)")
+    lines.append("")
+
+    # 10. CONFIDENCE
     lines.append("CONFIDENCE:")
     mean_conf = confidence.get("mean_confidence", 1.0)
     lines.append(f"  Mean Confidence:     {mean_conf:.6f}")
@@ -344,7 +393,7 @@ def format_human_report(report_data: dict[str, Any]) -> str:
             lines.append(f"    - {u_name:<14} {w_conf[u_name]:.6f}")
     lines.append("")
 
-    # 10. SOURCE
+    # 11. SOURCE
     lines.append("SOURCE:")
     src_map = sources.get("events_by_source", {})
     if src_map:
@@ -377,6 +426,17 @@ def main(argv: list[str] | None = None) -> int:
             until=args.until,
             db_path_str=args.db_path,
         )
+
+        if args.html_path:
+            from .usage_visualization import generate_html_report, write_html_report
+
+            html_content = generate_html_report(report_data)
+            out_file = write_html_report(html_content, args.html_path)
+            if args.json:
+                print(deterministic_json_dumps(report_data))
+            else:
+                print(f"Usage report HTML visualization written to: {out_file}")
+            return 0
 
         if args.json:
             print(deterministic_json_dumps(report_data))

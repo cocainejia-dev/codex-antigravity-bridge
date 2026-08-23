@@ -44,6 +44,8 @@ from codex_agy_bridge.telemetry_hooks import (  # noqa: E402
     record_account_switch_event,
     record_agy_job_completion_event,
     record_agy_job_start_event,
+    record_avoided_duplicate_retry_event,
+    record_duplicate_quota_risk_event,
     record_oneshot_call_event,
     record_reconciliation_event,
     record_retry_event,
@@ -614,3 +616,72 @@ def test_reconciliation_and_retry_hooks():
         assert ev_ret.measurement_type == "retries"
         assert ev_ret.value == 1.0
         assert ev_ret.metadata["attempt"] == 3
+
+
+def test_duplicate_quota_risk_and_avoided_retry_hooks():
+    """Verify duplicate quota risk and avoided duplicate retry hooks record DERIVED metrics without token claims."""
+    with temporary_db_dir() as td:
+        db_path = td / "telemetry.sqlite3"
+
+        # 1. Duplicate Quota Risk Event
+        ev_risk = record_duplicate_quota_risk_event(
+            run_id="run-dup-1",
+            task_id="t-dup-1",
+            project_dir="D:/Projects/App",
+            reason="Multiple active workers detected for same task",
+            metadata={"secret_token": "sk-secret-do-not-leak", "extra_info": "reconciliation_guard"},
+            db_path=db_path,
+        )
+        assert ev_risk is not None
+        assert ev_risk.actor == "bridge"
+        assert ev_risk.event_type == "duplicate_quota_risk"
+        assert ev_risk.measurement_type == "duplicate_quota_risks"
+        assert ev_risk.value == 1.0
+        assert ev_risk.unit == "count"
+        assert ev_risk.measurement_source == MeasurementSource.DERIVED
+        assert ev_risk.confidence == 0.9
+        assert ev_risk.metadata["reason"] == "Multiple active workers detected for same task"
+        assert ev_risk.metadata["savings_claimed"] is False
+        assert ev_risk.metadata["observational_basis"] == "derived_risk_observation"
+        # Secret redaction check
+        assert "sk-secret" not in json.dumps(ev_risk.metadata)
+        assert ev_risk.metadata["extra_info"] == "reconciliation_guard"
+
+        # 2. Avoided Duplicate Retry Event
+        ev_avoided = record_avoided_duplicate_retry_event(
+            run_id="run-dup-1",
+            task_id="t-dup-1",
+            project_dir="D:/Projects/App",
+            reason="Reconciliation confirmed worker is still executing normally",
+            metadata={"token": "ghp_123456789012345678901234567890123456", "guard": "lock_acquired"},
+            db_path=db_path,
+        )
+        assert ev_avoided is not None
+        assert ev_avoided.actor == "bridge"
+        assert ev_avoided.event_type == "avoided_duplicate_retry"
+        assert ev_avoided.measurement_type == "avoided_duplicate_retries"
+        assert ev_avoided.value == 1.0
+        assert ev_avoided.unit == "count"
+        assert ev_avoided.measurement_source == MeasurementSource.DERIVED
+        assert ev_avoided.confidence == 0.9
+        assert ev_avoided.metadata["reason"] == "Reconciliation confirmed worker is still executing normally"
+        assert ev_avoided.metadata["savings_claimed"] is False
+        assert ev_avoided.metadata["observational_basis"] == "derived_avoided_retry"
+        # Secret redaction check
+        assert "ghp_12345" not in json.dumps(ev_avoided.metadata)
+        assert ev_avoided.metadata["guard"] == "lock_acquired"
+
+        # Query ledger
+        ledger = get_telemetry_ledger(db_path)
+        events = ledger.query(run_id="run-dup-1")
+        assert len(events) == 2
+
+
+def test_duplicate_quota_hooks_failsafe():
+    """Verify duplicate quota hooks never raise exceptions if ledger fails."""
+    with patch("codex_agy_bridge.telemetry_hooks.get_telemetry_ledger", side_effect=RuntimeError("Storage crash")):
+        res_risk = record_duplicate_quota_risk_event(run_id="r1", reason="risk")
+        assert res_risk is None
+
+        res_avoided = record_avoided_duplicate_retry_event(run_id="r1", reason="avoided")
+        assert res_avoided is None
