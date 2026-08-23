@@ -439,5 +439,133 @@ def test_fastmcp_call_tool_dispatch(tmp_path: Path) -> None:
         res_data = json.loads(res_res[0].text)
         assert res_data["state"] == "CANCELLED"
         assert res_data["last_error"] == "Dispatch cancel"
+        assert res_data["usage_report_status"] in ("READY", "FAILED")
 
     asyncio.run(_run_async_dispatch())
+
+
+def test_run_result_exact_report_metadata_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify run_result returns READY usage_report_status, resolved path, and valid file URI."""
+    reports_dir = tmp_path / "custom_reports"
+    telemetry_db = tmp_path / "telemetry.sqlite3"
+    monkeypatch.setenv("CODEX_AGY_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CODEX_AGY_TELEMETRY_DB", str(telemetry_db))
+
+    db_file = tmp_path / "vnext_res_meta.sqlite3"
+    task = _sample_task_dict(task_id="task-res-meta-01")
+
+    start_json = run_start(db_path=str(db_file), task=task, run_id="run-res-meta-01")
+    run_id = json.loads(start_json)["run_id"]
+
+    # Wait for completion or cancel
+    cancel_json = run_cancel(db_path=str(db_file), run_id=run_id, reason="Completed for test")
+    assert json.loads(cancel_json)["state"] == "CANCELLED"
+
+    result_json = run_result(db_path=str(db_file), run_id=run_id)
+    result_data = json.loads(result_json)
+
+    assert result_data["run_id"] == "run-res-meta-01"
+    assert result_data["state"] == "CANCELLED"
+    assert result_data["usage_report_status"] == "READY"
+    assert result_data["usage_report_path"] is not None
+    assert result_data["usage_report_uri"] is not None
+    assert result_data["usage_report_reason"] is None
+
+    expected_path = (reports_dir / "run-res-meta-01.html").resolve()
+    assert Path(result_data["usage_report_path"]).resolve() == expected_path
+    assert result_data["usage_report_uri"] == expected_path.as_uri()
+    assert expected_path.is_file()
+
+    html_text = expected_path.read_text(encoding="utf-8")
+    assert '<html lang="zh-CN">' in html_text
+    assert "run-res-meta-01" in html_text
+
+
+def test_run_result_report_failure_isolation_preserves_task_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify that report generation failure preserves TASK_RESULT and state, returning secret-safe FAILED reason."""
+    db_file = tmp_path / "vnext_res_fail.sqlite3"
+    task = _sample_task_dict(task_id="task-res-fail-01")
+
+    start_json = run_start(db_path=str(db_file), task=task, run_id="run-res-fail-01")
+    run_id = json.loads(start_json)["run_id"]
+
+    cancel_json = run_cancel(db_path=str(db_file), run_id=run_id, reason="Intentional cancel")
+    assert json.loads(cancel_json)["state"] == "CANCELLED"
+
+    # Monkeypatch write_stable_report to raise with an embedded secret key
+    secret_leak = "sk-supersecretleakedtoken1234567890"
+    def _exploding_writer(*args: Any, **kwargs: Any) -> Any:
+        raise OSError(f"Disk I/O error occurred with secret: {secret_leak}")
+
+    from codex_agy_bridge import usage_reports
+    monkeypatch.setattr(usage_reports, "write_stable_report", _exploding_writer)
+
+    result_json = run_result(db_path=str(db_file), run_id=run_id)
+    result_data = json.loads(result_json)
+
+    # State and task results must be preserved exactly
+    assert result_data["run_id"] == "run-res-fail-01"
+    assert result_data["state"] == "CANCELLED"
+    assert result_data["last_error"] == "Intentional cancel"
+
+    # Report fields must indicate failure safely
+    assert result_data["usage_report_status"] == "FAILED"
+    assert result_data["usage_report_path"] is None
+    assert result_data["usage_report_uri"] is None
+    assert result_data["usage_report_reason"] is not None
+    assert secret_leak not in result_data["usage_report_reason"]
+    assert "[REDACTED_API_KEY]" in result_data["usage_report_reason"] or "Usage report" in result_data["usage_report_reason"]
+
+
+def test_run_result_exact_run_id_filtering_no_latest_guessing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify run_result uses exact run_id telemetry events and never uses --latest to guess runs."""
+    reports_dir = tmp_path / "exact_reports"
+    telemetry_db = tmp_path / "exact_telemetry.sqlite3"
+    monkeypatch.setenv("CODEX_AGY_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CODEX_AGY_TELEMETRY_DB", str(telemetry_db))
+
+    from codex_agy_bridge.telemetry import EventOrigin
+    from codex_agy_bridge.telemetry_hooks import get_telemetry_ledger
+
+    ledger = get_telemetry_ledger(telemetry_db)
+    # Record distinct events for run-alpha and run-beta
+    ledger.record_event(
+        actor="agy",
+        event_type="worker_launch",
+        measurement_type="call_count",
+        value=1.0,
+        unit="calls",
+        origin=EventOrigin.PRODUCTION,
+        run_id="run-alpha-exact",
+    )
+    ledger.record_event(
+        actor="agy",
+        event_type="worker_launch",
+        measurement_type="call_count",
+        value=1.0,
+        unit="calls",
+        origin=EventOrigin.PRODUCTION,
+        run_id="run-beta-latest-distractor",
+    )
+
+    db_file = tmp_path / "vnext_exact.sqlite3"
+    task = _sample_task_dict(task_id="task-exact-01")
+    start_json = run_start(db_path=str(db_file), task=task, run_id="run-alpha-exact")
+    run_id = json.loads(start_json)["run_id"]
+
+    run_cancel(db_path=str(db_file), run_id=run_id, reason="Exact test")
+
+    result_json = run_result(db_path=str(db_file), run_id="run-alpha-exact")
+    result_data = json.loads(result_json)
+
+    assert result_data["usage_report_status"] == "READY"
+    report_file = Path(result_data["usage_report_path"])
+    assert report_file.is_file()
+
+    content = report_file.read_text(encoding="utf-8")
+    assert "run-alpha-exact" in content
+    assert "run-beta-latest-distractor" not in content

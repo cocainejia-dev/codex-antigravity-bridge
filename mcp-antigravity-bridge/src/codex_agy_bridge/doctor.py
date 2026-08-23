@@ -870,6 +870,327 @@ def check_telemetry_storage(
         )
 
 
+def check_test_isolation(
+    isolation_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> CheckResult:
+    """Read-only check verifying telemetry event provenance and test isolation."""
+    if isolation_checker:
+        try:
+            ok, desc, what_next = isolation_checker()
+            if ok:
+                return CheckResult(
+                    name="Test Isolation & Provenance",
+                    status=CheckStatus.PASS,
+                    details=f"Test isolation and provenance active ({desc})",
+                )
+            return CheckResult(
+                name="Test Isolation & Provenance",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Test Isolation & Provenance",
+                status=CheckStatus.FAIL,
+                details=f"Test isolation check failed: {exc}",
+                what_to_do_next="Verify telemetry.py origin resolution rules.",
+            )
+
+    try:
+        from .telemetry import EventOrigin, resolve_default_origin
+
+        active_env = env if env is not None else os.environ
+
+        # Verify EventOrigin values exist
+        assert EventOrigin.TEST == EventOrigin.from_value("TEST")
+        assert EventOrigin.CI == EventOrigin.from_value("CI")
+        assert EventOrigin.PRODUCTION == EventOrigin.from_value("PRODUCTION")
+
+        # Test explicit origin mapping
+        if resolve_default_origin("test") != EventOrigin.TEST or resolve_default_origin("production") != EventOrigin.PRODUCTION:
+            return CheckResult(
+                name="Test Isolation & Provenance",
+                status=CheckStatus.FAIL,
+                details="EventOrigin from_value resolution failed",
+                what_to_do_next="Check resolve_default_origin in telemetry.py.",
+            )
+
+        # Check detected origin according to environment
+        env_origin_setting = active_env.get("CODEX_AGY_TELEMETRY_ORIGIN")
+        if env_origin_setting:
+            detected_origin = EventOrigin.from_value(env_origin_setting).value
+        elif "PYTEST_CURRENT_TEST" in active_env or "PYTEST_VERSION" in active_env:
+            detected_origin = EventOrigin.TEST.value
+        elif active_env.get("CI", "").strip().lower() in ("true", "1", "yes") or any(
+            k in active_env for k in ("GITHUB_ACTIONS", "GITLAB_CI", "TRAVIS", "CIRCLECI", "BITBUCKET_COMMIT", "TF_BUILD", "BUILD_BUILDID")
+        ):
+            detected_origin = EventOrigin.CI.value
+        else:
+            detected_origin = EventOrigin.PRODUCTION.value
+
+        return CheckResult(
+            name="Test Isolation & Provenance",
+            status=CheckStatus.PASS,
+            details=f"Telemetry test isolation and provenance active (detected origin: {detected_origin})",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Test Isolation & Provenance",
+            status=CheckStatus.FAIL,
+            details=f"Test isolation check error: {exc}",
+            what_to_do_next="Ensure codex_agy_bridge.telemetry is intact.",
+        )
+
+
+def check_report_directory(
+    reports_dir: Path | str | None = None,
+    dir_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> CheckResult:
+    """Read-only check for HTML usage report storage directory without creating it."""
+    if dir_checker:
+        try:
+            ok, desc, what_next = dir_checker()
+            if ok:
+                return CheckResult(
+                    name="Report Directory",
+                    status=CheckStatus.PASS,
+                    details=f"Report directory ready ({desc})",
+                )
+            return CheckResult(
+                name="Report Directory",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Report Directory",
+                status=CheckStatus.FAIL,
+                details=f"Report directory check error: {exc}",
+                what_to_do_next="Verify reports directory path and permissions.",
+            )
+
+    try:
+        from .usage_reports import get_default_reports_dir
+
+        active_env = env if env is not None else os.environ
+        env_dir = active_env.get("CODEX_AGY_REPORTS_DIR")
+        if reports_dir is not None:
+            resolved = Path(reports_dir).resolve()
+        elif env_dir and env_dir.strip():
+            resolved = Path(env_dir.strip()).resolve()
+        else:
+            resolved = get_default_reports_dir()
+
+        if resolved.exists():
+            if not resolved.is_dir():
+                return CheckResult(
+                    name="Report Directory",
+                    status=CheckStatus.FAIL,
+                    details=f"Report path exists but is not a directory: {resolved}",
+                    what_to_do_next="Ensure CODEX_AGY_REPORTS_DIR points to a directory.",
+                )
+            if not os.access(str(resolved), os.R_OK | os.W_OK):
+                return CheckResult(
+                    name="Report Directory",
+                    status=CheckStatus.FAIL,
+                    details=f"Report directory exists but is not writable: {resolved}",
+                    what_to_do_next="Grant write permissions to the report directory.",
+                )
+            return CheckResult(
+                name="Report Directory",
+                status=CheckStatus.PASS,
+                details=f"Report directory active at {resolved}",
+            )
+
+        parent = resolved.parent
+        if parent.exists() and (not parent.is_dir() or not os.access(str(parent), os.R_OK | os.W_OK)):
+            return CheckResult(
+                name="Report Directory",
+                status=CheckStatus.FAIL,
+                details=f"Parent directory of report path is not writable: {parent}",
+                what_to_do_next="Grant write permissions to parent directory.",
+            )
+
+        return CheckResult(
+            name="Report Directory",
+            status=CheckStatus.PASS,
+            details=f"Report directory ready (will be lazily created at {resolved})",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Report Directory",
+            status=CheckStatus.FAIL,
+            details=f"Report directory check error: {exc}",
+            what_to_do_next="Check filesystem permissions for report directory.",
+        )
+
+
+def check_chinese_html_report(
+    template_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+) -> CheckResult:
+    """Read-only check for Chinese HTML report template and default language."""
+    if template_checker:
+        try:
+            ok, desc, what_next = template_checker()
+            if ok:
+                return CheckResult(
+                    name="Chinese HTML Report",
+                    status=CheckStatus.PASS,
+                    details=desc,
+                )
+            return CheckResult(
+                name="Chinese HTML Report",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Chinese HTML Report",
+                status=CheckStatus.FAIL,
+                details=f"Chinese HTML report check error: {exc}",
+                what_to_do_next="Verify usage_visualization.py generate_html_report implementation.",
+            )
+
+    try:
+        from .usage_visualization import generate_html_report
+
+        sample_data = {
+            "filters": {"run_id": "doctor-check-run", "db_path": ":memory:"},
+            "summary": {"event_count": 0, "unavailable_count": 0},
+            "codex": {"calls": 0, "monitoring_turns": 0.0, "resumptions": 0},
+            "antigravity": {
+                "calls": 0,
+                "duration_seconds": 0.0,
+                "successes": 0,
+                "failures": 0,
+                "changed_files": 0,
+                "lines_of_code": 0,
+            },
+            "attribution": {
+                "classification": "DERIVED/ESTIMATED",
+                "basis": "recorded_measurable_workload",
+                "statement": "Observational workload.",
+            },
+            "retries": {"total_count": 0, "events": []},
+            "timeouts": {"total_count": 0, "classes": {}, "events": []},
+            "account_switches": {"total_count": 0, "events": []},
+            "duplicate_quota_metrics": {"risk_count": 0, "avoided_count": 0, "source": "DERIVED"},
+            "confidence": {"mean_confidence": 1.0, "weighted_confidence_by_unit": {}},
+            "sources": {"events_by_source": {}},
+            "events": [],
+        }
+        html_out = generate_html_report(sample_data)
+        if '<html lang="zh-CN">' not in html_out:
+            return CheckResult(
+                name="Chinese HTML Report",
+                status=CheckStatus.FAIL,
+                details="Generated HTML is missing lang='zh-CN' attribute",
+                what_to_do_next="Ensure generate_html_report defaults to zh-CN in usage_visualization.py.",
+            )
+        if "调用占比" not in html_out or "运行观测指标" not in html_out:
+            return CheckResult(
+                name="Chinese HTML Report",
+                status=CheckStatus.FAIL,
+                details="Generated HTML is missing Chinese headings or call share labels",
+                what_to_do_next="Ensure generate_html_report includes standard Chinese labels.",
+            )
+        return CheckResult(
+            name="Chinese HTML Report",
+            status=CheckStatus.PASS,
+            details="Chinese HTML visualization template active (lang='zh-CN', zero-dependency)",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Chinese HTML Report",
+            status=CheckStatus.FAIL,
+            details=f"HTML report generator failed: {exc}",
+            what_to_do_next="Ensure codex_agy_bridge.usage_visualization is intact.",
+        )
+
+
+def check_latest_production_selection(
+    selection_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+) -> CheckResult:
+    """Read-only check for production-safe latest run selection rules."""
+    if selection_checker:
+        try:
+            ok, desc, what_next = selection_checker()
+            if ok:
+                return CheckResult(
+                    name="Latest Production Selection",
+                    status=CheckStatus.PASS,
+                    details=desc,
+                )
+            return CheckResult(
+                name="Latest Production Selection",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Latest Production Selection",
+                status=CheckStatus.FAIL,
+                details=f"Latest production selection check error: {exc}",
+                what_to_do_next="Verify find_latest_run in usage_reports.py.",
+            )
+
+    try:
+        from .telemetry import EventOrigin, UsageLedger
+        from .usage_reports import find_latest_run
+
+        test_ledger = UsageLedger(in_memory=True, fail_safe=False)
+        test_ledger.record_event(
+            actor="agy",
+            event_type="worker_launch",
+            measurement_type="call_count",
+            value=1.0,
+            unit="calls",
+            origin=EventOrigin.TEST,
+            run_id="run-test-001",
+        )
+        test_ledger.record_event(
+            actor="agy",
+            event_type="worker_launch",
+            measurement_type="call_count",
+            value=1.0,
+            unit="calls",
+            origin=EventOrigin.PRODUCTION,
+            run_id="run-prod-001",
+        )
+        latest = find_latest_run(test_ledger)
+        test_ledger.close()
+
+        if latest is None or latest.get("run_id") != "run-prod-001":
+            return CheckResult(
+                name="Latest Production Selection",
+                status=CheckStatus.FAIL,
+                details=f"find_latest_run did not select confirmed PRODUCTION run (got {latest})",
+                what_to_do_next="Verify find_latest_run rules in usage_reports.py.",
+            )
+
+        return CheckResult(
+            name="Latest Production Selection",
+            status=CheckStatus.PASS,
+            details="Latest production selection safety active (excludes TEST/CI, prioritizes confirmed PRODUCTION)",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Latest Production Selection",
+            status=CheckStatus.FAIL,
+            details=f"Latest run selection check failed: {exc}",
+            what_to_do_next="Ensure usage_reports.py find_latest_run is functional.",
+        )
+
+
+check_telemetry_db = check_telemetry_storage
+
+
 def check_secret_redaction(
     redaction_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
 ) -> CheckResult:
@@ -951,6 +1272,11 @@ def run_doctor(
     quota_source_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
     telemetry_db_path: Path | str | None = None,
     storage_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    isolation_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    reports_dir: Path | str | None = None,
+    report_dir_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    chinese_report_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    latest_selection_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
     redaction_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
 ) -> DoctorReport:
     plat = platform or sys.platform
@@ -975,6 +1301,10 @@ def run_doctor(
         check_token_usage_source(source_checker=token_source_checker),
         check_quota_usage_source(source_checker=quota_source_checker),
         check_telemetry_storage(db_path=telemetry_db_path, storage_checker=storage_checker, env=env),
+        check_test_isolation(isolation_checker=isolation_checker, env=env),
+        check_report_directory(reports_dir=reports_dir, dir_checker=report_dir_checker, env=env),
+        check_chinese_html_report(template_checker=chinese_report_checker),
+        check_latest_production_selection(selection_checker=latest_selection_checker),
         check_secret_redaction(redaction_checker=redaction_checker),
     ]
 

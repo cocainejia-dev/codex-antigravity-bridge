@@ -15,21 +15,26 @@ from codex_agy_bridge.doctor import (
     DoctorReport,
     check_agy_version,
     check_auth_state,
+    check_chinese_html_report,
     check_codex_mcp,
     check_git,
     check_headless_availability,
     check_import_provenance,
     check_install_health,
+    check_latest_production_selection,
     check_proxy_presence,
     check_python,
-    check_runtime_provenance,
-    check_skill_installation,
-    check_windows_conpty,
-    check_usage_ledger,
-    check_token_usage_source,
     check_quota_usage_source,
-    check_telemetry_storage,
+    check_report_directory,
+    check_runtime_provenance,
     check_secret_redaction,
+    check_skill_installation,
+    check_telemetry_db,
+    check_telemetry_storage,
+    check_test_isolation,
+    check_token_usage_source,
+    check_usage_ledger,
+    check_windows_conpty,
     format_report_text,
     run_doctor,
 )
@@ -431,7 +436,7 @@ def test_run_doctor_all_pass(tmp_path: Path) -> None:
     )
 
     assert report.overall_status == CheckStatus.PASS
-    assert len(report.checks) == 18
+    assert len(report.checks) == 22
     assert all(c.status == CheckStatus.PASS for c in report.checks)
 
 
@@ -631,3 +636,105 @@ def test_check_secret_redaction_fail() -> None:
     assert res.status == CheckStatus.FAIL
     assert "token leaked" in res.details
     assert res.what_to_do_next == "Fix regex"
+
+
+def test_check_telemetry_db_alias(tmp_path: Path) -> None:
+    db_file = tmp_path / "telemetry_alias.sqlite3"
+    res = check_telemetry_db(db_path=db_file)
+    assert res.status == CheckStatus.PASS
+    assert "Telemetry Storage" in res.name
+
+
+def test_check_test_isolation_pass() -> None:
+    res = check_test_isolation()
+    assert res.status == CheckStatus.PASS
+    assert "isolation" in res.details.lower()
+
+
+def test_check_test_isolation_custom_fail() -> None:
+    res = check_test_isolation(isolation_checker=lambda: (False, "mock isolation failure", "Fix isolation"))
+    assert res.status == CheckStatus.FAIL
+    assert "mock isolation failure" in res.details
+    assert res.what_to_do_next == "Fix isolation"
+
+
+def test_check_report_directory_pass(tmp_path: Path) -> None:
+    res = check_report_directory(reports_dir=tmp_path)
+    assert res.status == CheckStatus.PASS
+    assert "Report directory active" in res.details or "ready" in res.details
+
+
+def test_check_report_directory_lazy_create_does_not_mutate_filesystem(tmp_path: Path) -> None:
+    target_dir = tmp_path / "non_existent_reports_sub_dir"
+    assert not target_dir.exists()
+    res = check_report_directory(reports_dir=target_dir)
+    assert res.status == CheckStatus.PASS
+    assert "ready" in res.details.lower() or "lazily created" in res.details.lower()
+    # Ensure doctor check is strictly read-only and did not create the directory
+    assert not target_dir.exists()
+
+
+def test_check_report_directory_custom_fail() -> None:
+    res = check_report_directory(dir_checker=lambda: (False, "Permission denied for reports dir", "Fix chmod"))
+    assert res.status == CheckStatus.FAIL
+    assert "Permission denied" in res.details
+    assert res.what_to_do_next == "Fix chmod"
+
+
+def test_check_chinese_html_report_pass() -> None:
+    res = check_chinese_html_report()
+    assert res.status == CheckStatus.PASS
+    assert "zh-CN" in res.details
+
+
+def test_check_chinese_html_report_custom_fail() -> None:
+    res = check_chinese_html_report(template_checker=lambda: (False, "Missing Chinese labels", "Update template"))
+    assert res.status == CheckStatus.FAIL
+    assert "Missing Chinese labels" in res.details
+    assert res.what_to_do_next == "Update template"
+
+
+def test_check_latest_production_selection_pass() -> None:
+    res = check_latest_production_selection()
+    assert res.status == CheckStatus.PASS
+    assert "production selection safety active" in res.details.lower()
+
+
+def test_check_latest_production_selection_custom_fail() -> None:
+    res = check_latest_production_selection(selection_checker=lambda: (False, "Test run selected as latest", "Fix filter"))
+    assert res.status == CheckStatus.FAIL
+    assert "Test run selected" in res.details
+    assert res.what_to_do_next == "Fix filter"
+
+
+def test_doctor_read_only_guarantee(tmp_path: Path) -> None:
+    """Verify that running doctor does not create any files, directories or DB state on disk."""
+    non_existent_reports = tmp_path / "doctor_no_reports"
+    non_existent_db = tmp_path / "doctor_no_db.sqlite3"
+
+    config = tmp_path / "config.toml"
+    config.write_text('[mcp_servers.codex-agy-bridge]\ncommand = "/bin/python3"\n', encoding="utf-8")
+    skill_md = tmp_path / "skills" / "agy-supervisor" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True, exist_ok=True)
+    skill_md.write_text("# Skill", encoding="utf-8")
+
+    report = run_doctor(
+        version_info=(3, 11, 0),
+        executable="/bin/python3",
+        which_fn=lambda name: f"/bin/{name}",
+        run_cmd_fn=lambda cmd, timeout: subprocess.CompletedProcess(cmd, 0, stdout="1.0.0", stderr=""),
+        import_checker=lambda name: (True, "/path/to/pkg", None),
+        codex_home=tmp_path,
+        cwd=tmp_path,
+        env={"CODEX_AGY_REPORTS_DIR": str(non_existent_reports), "CODEX_AGY_TELEMETRY_DB": str(non_existent_db)},
+        platform="linux",
+        auth_checker=lambda: (True, "mock auth"),
+        dependency_checker=lambda: (True, []),
+        telemetry_db_path=non_existent_db,
+        reports_dir=non_existent_reports,
+    )
+
+    assert report.overall_status == CheckStatus.PASS
+    # Neither non-existent report dir nor non-existent DB file should have been created
+    assert not non_existent_reports.exists()
+    assert not non_existent_db.exists()

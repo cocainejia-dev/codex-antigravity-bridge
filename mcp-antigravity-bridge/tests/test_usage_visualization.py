@@ -147,9 +147,9 @@ def test_html_generation_structure_and_no_external_assets(tmp_path: Path):
     report_data = build_usage_report_data(ledger=ledger)
     html_out = generate_html_report(report_data)
 
-    # 1. Valid HTML5 structure
+    # 1. Valid HTML5 structure with Chinese lang attribute
     assert "<!DOCTYPE html>" in html_out
-    assert "<html" in html_out
+    assert '<html lang="zh-CN">' in html_out
     assert "<head>" in html_out
     assert "<style>" in html_out
     assert "</style>" in html_out
@@ -162,8 +162,9 @@ def test_html_generation_structure_and_no_external_assets(tmp_path: Path):
     assert not re.search(r'<img[^>]+src=["\']http', html_out, re.IGNORECASE)
     assert not re.search(r'url\(["\']?http', html_out, re.IGNORECASE)
 
-    # 3. Headers and Titles
-    assert "Codex &lt;-&gt; Antigravity Bridge Usage Telemetry" in html_out
+    # 3. Chinese Headers and Titles
+    assert "Codex &lt;-&gt; Antigravity Bridge 使用观测指标" in html_out
+    assert "观测遥测报告与调用占比可视化" in html_out
 
 
 def test_html_labels_exact_estimated_unavailable(tmp_path: Path):
@@ -185,8 +186,10 @@ def test_html_labels_exact_estimated_unavailable(tmp_path: Path):
     assert "badge-unavail" in html_out
     assert "UNAVAILABLE" in html_out
 
-    # Disclaimer check
-    assert "No provider-token savings or synthetic cost discount claims are made" in html_out
+    # Chinese token/quota unavailable explanation and disclaimer check
+    assert "调用占比完全基于记录的实际可测量观测数据" in html_out
+    assert "不作任何模型提供商 Token 节省或虚假成本折扣断言" in html_out
+    assert "模型提供商 Token 与配额指标不可直接观测（UNAVAILABLE）" in html_out
 
 
 def test_html_duplicate_metrics_and_workload_totals(tmp_path: Path):
@@ -198,23 +201,28 @@ def test_html_duplicate_metrics_and_workload_totals(tmp_path: Path):
     report_data = build_usage_report_data(ledger=ledger)
     html_out = generate_html_report(report_data)
 
-    # Duplicate Quota Metrics in HTML
-    assert "Duplicate Quota Metrics" in html_out
-    assert "1 count" in html_out  # 1 risk, 1 avoided
-    assert "Duplicate Quota Risks" in html_out
-    assert "Avoided Retries" in html_out
+    # Duplicate Quota Metrics in Chinese HTML
+    assert "重复配额风险指标" in html_out
+    assert "1 次风险" in html_out or "1 次" in html_out
+    assert "重复配额风险" in html_out
+    assert "已避免重复重试" in html_out
 
-    # Antigravity Workload & Codex Supervision
-    assert "Antigravity Execution" in html_out
-    assert "Codex Supervision" in html_out
+    # Antigravity Workload & Codex Supervision (Chinese headings)
+    assert "Antigravity 执行指标" in html_out
+    assert "Codex 监督指标" in html_out
     assert "165" in html_out or "165.00s" in html_out  # 45s + 120s = 165s
-    assert "Monitoring Baseline" in html_out
+    assert "监督轮次基线" in html_out
 
     # Operational Events
-    assert "Operational Events" in html_out
-    assert "Retries" in html_out
-    assert "Timeouts" in html_out
-    assert "Account Switches" in html_out
+    assert "运行可靠性事件" in html_out
+    assert "重试次数" in html_out
+    assert "超时次数" in html_out
+    assert "账号切换次数" in html_out
+
+    # Call Share Semantics
+    assert "调用占比分析 (Call Share)" in html_out
+    assert "Antigravity 调用占比" in html_out
+    assert "Codex 调用占比" in html_out
 
 
 def test_html_escaping_and_xss_safety():
@@ -315,7 +323,8 @@ def test_cli_html_option(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     assert html_file.exists()
     file_content = html_file.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in file_content
-    assert "Antigravity Execution" in file_content
+    assert '<html lang="zh-CN">' in file_content
+    assert "Antigravity 执行指标" in file_content
 
     # 2. HTML report generation with --json preserving stdout JSON output
     html_file_json = tmp_path / "output_json.html"
@@ -341,9 +350,10 @@ def test_empty_database_html_generation(tmp_path: Path, capsys: pytest.CaptureFi
     assert html_file.exists()
     content = html_file.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in content
-    assert "Events:</span><span class=\"filter-value\">0 (Unavailable: 0)" in content
-    assert "No measurable unit totals recorded" in content
-    assert "No telemetry events found matching filters" in content
+    assert '<html lang="zh-CN">' in content
+    assert "事件总数:</span><span class=\"filter-value\">0 (不可用数据点: 0)" in content
+    assert "未记录可测量单位总计" in content
+    assert "未找到符合过滤条件的遥测事件" in content
 
 
 def test_mixed_units_never_mixed_in_html(tmp_path: Path):
@@ -381,4 +391,34 @@ def test_mixed_units_never_mixed_in_html(tmp_path: Path):
     assert "<code>turns</code>" in html_out
     # Each unit is presented in its own table row with exact value
     assert "30s" in html_out or "30" in html_out
-    assert "2 calls" in html_out or "2" in html_out
+    assert "2 次调用" in html_out or "2" in html_out
+
+
+def test_call_share_semantics_and_zero_calls():
+    """Verify call share calculation semantics, fallback on zero calls, and no token discount claims."""
+    # Scenario 1: Zero calls -> 50% / 50% fallback without division by zero
+    report_zero = {
+        "filters": {},
+        "summary": {},
+        "codex": {"calls": 0, "monitoring_turns": 0.0},
+        "antigravity": {"calls": 0, "duration_seconds": 0.0},
+        "events": [],
+    }
+    html_zero = generate_html_report(report_zero)
+    assert "Antigravity 调用占比 (50.0%)" in html_zero
+    assert "Codex 调用占比 (50.0%)" in html_zero
+    assert "调用占比分析 (Call Share)" in html_zero
+
+    # Scenario 2: Unequal calls (agy=3, codex=1 -> total=4, agy=75.0%, codex=25.0%)
+    report_unequal = {
+        "filters": {},
+        "summary": {},
+        "codex": {"calls": 1, "monitoring_turns": 0.0},
+        "antigravity": {"calls": 3, "duration_seconds": 15.0},
+        "events": [],
+    }
+    html_unequal = generate_html_report(report_unequal)
+    assert "Antigravity 调用占比 (75.0%)" in html_unequal
+    assert "Codex 调用占比 (25.0%)" in html_unequal
+    # Strictly DERIVED, no provider token claims
+    assert "不作任何模型提供商 Token 节省或虚假成本折扣断言" in html_unequal

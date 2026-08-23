@@ -1,13 +1,18 @@
-"""Usage Telemetry Reporting CLI for Codex <-> Antigravity Bridge.
+r"""Usage Telemetry Reporting CLI for Codex <-> Antigravity Bridge.
 
 Provides the `codex-agy-bridge usage` CLI command for querying, aggregating,
 and reporting observational telemetry metrics:
 - Filter by run_id, task_id, project directory, and time range
+- Production-safe --latest selection (defaulting to newest confirmed PRODUCTION run/task,
+  excluding TEST/CI and not letting UNKNOWN override production)
+- Explicit opt-in flags (--include-test, --include-ci, --include-unknown)
 - Default human report clearly labeling RUN, CODEX, ANTIGRAVITY, MEASUREMENTS,
   ATTRIBUTION, RETRIES, TIMEOUTS, ACCOUNT_SWITCHES, CONFIDENCE, SOURCE
 - Deterministic JSON output preserving separate units (never summing incompatible units)
 - Explicit DERIVED/ESTIMATED attribution based solely on recorded measurable workload
   (no provider-token savings or synthetic discount claims)
+- Zero-dependency, lightweight Chinese HTML visualization reports
+- Stable report directory helper (%LOCALAPPDATA%\codex-agy-bridge\reports) and URI output
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import sys
 from typing import Any, Mapping, Sequence
 
 from .telemetry import (
+    EventOrigin,
     MeasurementSource,
     UsageEvent,
     UsageLedger,
@@ -32,6 +38,12 @@ from .telemetry import (
     paths_equal,
 )
 from .telemetry_hooks import get_telemetry_ledger
+from .usage_reports import (
+    find_latest_run,
+    get_default_reports_dir,
+    resolve_report_path,
+    write_stable_report,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +89,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="filter events ending at or before timestamp (ISO 8601 or unix epoch)",
     )
     parser.add_argument(
+        "--latest",
+        action="store_true",
+        dest="latest",
+        default=False,
+        help="select newest confirmed PRODUCTION run/task (excluding TEST/CI/UNKNOWN by default)",
+    )
+    parser.add_argument(
+        "--include-test",
+        action="store_true",
+        dest="include_test",
+        default=False,
+        help="include TEST origin events/runs in latest selection and reporting",
+    )
+    parser.add_argument(
+        "--include-ci",
+        action="store_true",
+        dest="include_ci",
+        default=False,
+        help="include CI origin events/runs in latest selection and reporting",
+    )
+    parser.add_argument(
+        "--include-unknown",
+        action="store_true",
+        dest="include_unknown",
+        default=False,
+        help="include UNKNOWN origin events/runs in latest selection and reporting",
+    )
+    parser.add_argument(
         "--json",
         "-j",
         action="store_true",
@@ -86,7 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--html",
         dest="html_path",
         default=None,
-        help="generate lightweight stdlib-only HTML visualization report to specified path",
+        const="AUTO",
+        nargs="?",
+        help="generate lightweight stdlib-only HTML visualization report to specified path (or default stable report directory)",
     )
     return parser
 
@@ -99,8 +141,75 @@ def build_usage_report_data(
     since: str | datetime | float | None = None,
     until: str | datetime | float | None = None,
     db_path_str: str | None = None,
+    is_latest_requested: bool = False,
+    latest_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Query ledger and construct structured telemetry report data dictionary."""
+    if is_latest_requested and latest_info is None:
+        # No confirmed production run found
+        summary = UsageSummary()
+        norm_proj = normalize_project_path(project_dir)
+        return {
+            "filters": {
+                "db_path": db_path_str or str(ledger.db_path) if ledger.db_path else ":memory:",
+                "run_id": None,
+                "task_id": None,
+                "project_dir": norm_proj,
+                "since": str(since) if since is not None else None,
+                "until": str(until) if until is not None else None,
+                "latest": True,
+                "latest_found": False,
+            },
+            "message": "No confirmed production run found in telemetry ledger.",
+            "summary": summary.to_dict(),
+            "codex": {"calls": 0, "monitoring_turns": 0.0, "resumptions": 0},
+            "antigravity": {
+                "calls": 0,
+                "duration_seconds": 0.0,
+                "successes": 0,
+                "failures": 0,
+                "changed_files": 0,
+                "lines_of_code": 0,
+            },
+            "attribution": {
+                "classification": "DERIVED/ESTIMATED",
+                "basis": "recorded_measurable_workload",
+                "statement": (
+                    "Workload attribution is DERIVED/ESTIMATED solely from recorded measurable workload "
+                    "(execution duration, calls, monitoring turns, diffs). "
+                    "No provider-token savings or synthetic cost discount claims are made."
+                ),
+                "measurable_workload": {
+                    "antigravity_duration_seconds": 0.0,
+                    "antigravity_calls": 0,
+                    "antigravity_successes": 0,
+                    "antigravity_failures": 0,
+                    "codex_calls": 0,
+                    "codex_monitoring_turns": 0.0,
+                    "codex_resumptions": 0,
+                    "changed_files": 0,
+                    "lines_of_code": 0,
+                },
+            },
+            "retries": {"total_count": 0, "events": []},
+            "timeouts": {"total_count": 0, "classes": {}, "events": []},
+            "account_switches": {"total_count": 0, "events": []},
+            "duplicate_quota_metrics": {
+                "risk_count": 0,
+                "avoided_count": 0,
+                "source": MeasurementSource.DERIVED.value,
+                "statement": (
+                    "Duplicate quota risk and avoided duplicate retry counts are DERIVED observational metrics. "
+                    "No token savings or synthetic cost discount claims are made."
+                ),
+                "events": [],
+            },
+            "confidence": {"mean_confidence": 1.0, "weighted_confidence_by_unit": {}},
+            "sources": {"events_by_source": {}},
+            "events": [],
+        }
+
+    # Query events
     events = ledger.query(
         run_id=run_id,
         task_id=task_id,
@@ -190,15 +299,27 @@ def build_usage_report_data(
 
     norm_proj = normalize_project_path(project_dir)
 
+    filters_dict: dict[str, Any] = {
+        "db_path": db_path_str or str(ledger.db_path) if ledger.db_path else ":memory:",
+        "run_id": run_id,
+        "task_id": task_id,
+        "project_dir": norm_proj,
+        "since": str(since) if since is not None else None,
+        "until": str(until) if until is not None else None,
+    }
+    if is_latest_requested:
+        filters_dict["latest"] = True
+        filters_dict["latest_found"] = True
+        if latest_info:
+            filters_dict["latest_origin"] = (
+                latest_info["primary_origin"].value
+                if isinstance(latest_info.get("primary_origin"), EventOrigin)
+                else str(latest_info.get("primary_origin"))
+            )
+            filters_dict["latest_timestamp"] = latest_info.get("latest_timestamp")
+
     return {
-        "filters": {
-            "db_path": db_path_str or str(ledger.db_path) if ledger.db_path else ":memory:",
-            "run_id": run_id,
-            "task_id": task_id,
-            "project_dir": norm_proj,
-            "since": str(since) if since is not None else None,
-            "until": str(until) if until is not None else None,
-        },
+        "filters": filters_dict,
         "summary": summary.to_dict(),
         "codex": {
             "calls": int(codex_calls),
@@ -249,21 +370,7 @@ def build_usage_report_data(
 
 
 def format_human_report(report_data: dict[str, Any]) -> str:
-    """Format report data dictionary into human-readable text output.
-
-    Clearly labels:
-    - RUN
-    - CODEX
-    - ANTIGRAVITY
-    - MEASUREMENTS
-    - ATTRIBUTION
-    - RETRIES
-    - TIMEOUTS
-    - ACCOUNT_SWITCHES
-    - DUPLICATE_QUOTA_METRICS
-    - CONFIDENCE
-    - SOURCE
-    """
+    """Format report data dictionary into human-readable text output."""
     filters = report_data.get("filters", {})
     summary = report_data.get("summary", {})
     codex = report_data.get("codex", {})
@@ -281,6 +388,8 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     proj = filters.get("project_dir")
     since = filters.get("since")
     until = filters.get("until")
+    is_latest = filters.get("latest", False)
+    latest_found = filters.get("latest_found", True)
 
     lines: list[str] = [
         "=" * 70,
@@ -290,8 +399,17 @@ def format_human_report(report_data: dict[str, Any]) -> str:
 
     # 1. RUN
     lines.append("RUN:")
-    run_label = run_id if run_id else "ALL (unfiltered)"
-    lines.append(f"  Run ID:              {run_label}")
+    if is_latest and not latest_found:
+        lines.append("  Run ID:              (none) [No confirmed production run found]")
+        lines.append("  Notice:              TEST, CI, and UNKNOWN runs are excluded by default.")
+        lines.append("                       Use --include-test / --include-ci / --include-unknown to include.")
+    elif is_latest:
+        run_label = f"{run_id} (Latest confirmed PRODUCTION run)" if run_id else "LATEST (confirmed production)"
+        lines.append(f"  Run ID:              {run_label}")
+    else:
+        run_label = run_id if run_id else "ALL (unfiltered)"
+        lines.append(f"  Run ID:              {run_label}")
+
     if task_id:
         lines.append(f"  Task ID:             {task_id}")
     if proj:
@@ -417,25 +535,61 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         ledger = get_telemetry_ledger(args.db_path)
+
+        target_run_id = args.run_id
+        target_task_id = args.task_id
+        latest_info: dict[str, Any] | None = None
+
+        if args.latest:
+            latest_info = find_latest_run(
+                ledger=ledger,
+                project_dir=args.project_dir,
+                include_test=args.include_test,
+                include_ci=args.include_ci,
+                include_unknown=args.include_unknown,
+                since=args.since,
+                until=args.until,
+            )
+            if latest_info is not None:
+                target_run_id = latest_info.get("run_id")
+                target_task_id = latest_info.get("task_id") if not target_run_id else args.task_id
+
         report_data = build_usage_report_data(
             ledger=ledger,
-            run_id=args.run_id,
-            task_id=args.task_id,
+            run_id=target_run_id,
+            task_id=target_task_id,
             project_dir=args.project_dir,
             since=args.since,
             until=args.until,
             db_path_str=args.db_path,
+            is_latest_requested=args.latest,
+            latest_info=latest_info,
         )
 
-        if args.html_path:
-            from .usage_visualization import generate_html_report, write_html_report
+        if args.html_path is not None:
+            from .usage_visualization import generate_html_report
+
+            target_path, alias_path = resolve_report_path(
+                html_path=args.html_path,
+                run_id=report_data["filters"].get("run_id"),
+                task_id=report_data["filters"].get("task_id"),
+                is_latest=args.latest,
+            )
 
             html_content = generate_html_report(report_data)
-            out_file = write_html_report(html_content, args.html_path)
+            out_file, target_uri, out_alias, alias_uri = write_stable_report(
+                html_content=html_content,
+                target_path=target_path,
+                alias_path=alias_path,
+            )
+
             if args.json:
                 print(deterministic_json_dumps(report_data))
             else:
-                print(f"Usage report HTML visualization written to: {out_file}")
+                if out_alias is not None:
+                    print(f"Usage report HTML visualization written to: {out_file} ({target_uri}) [alias: {out_alias}]")
+                else:
+                    print(f"Usage report HTML visualization written to: {out_file} ({target_uri})")
             return 0
 
         if args.json:

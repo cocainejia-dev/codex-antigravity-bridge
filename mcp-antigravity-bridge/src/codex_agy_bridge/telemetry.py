@@ -138,6 +138,48 @@ class MeasurementSource(str, Enum):
         raise ValueError(f"Unknown measurement source: {val!r}")
 
 
+class EventOrigin(str, Enum):
+    """Classification of usage telemetry event origin."""
+
+    PRODUCTION = "PRODUCTION"
+    TEST = "TEST"
+    CI = "CI"
+    UNKNOWN = "UNKNOWN"
+
+    @classmethod
+    def from_value(cls, val: str | EventOrigin | None) -> EventOrigin:
+        """Parse origin with case and character normalization, defaulting to UNKNOWN if unrecognized."""
+        if val is None:
+            return cls.UNKNOWN
+        if isinstance(val, cls):
+            return val
+        if not isinstance(val, str):
+            return cls.UNKNOWN
+        norm = val.strip().upper().replace("-", "_").replace(" ", "_")
+        for member in cls:
+            if member.value == norm or member.name == norm:
+                return member
+        return cls.UNKNOWN
+
+
+def resolve_default_origin(origin: str | EventOrigin | None = None) -> EventOrigin:
+    """Resolve telemetry origin taking into account explicit parameters and environment context."""
+    if origin is not None:
+        return EventOrigin.from_value(origin)
+    env_orig = os.environ.get("CODEX_AGY_TELEMETRY_ORIGIN")
+    if env_orig and env_orig.strip():
+        return EventOrigin.from_value(env_orig.strip())
+    if "PYTEST_CURRENT_TEST" in os.environ or "PYTEST_VERSION" in os.environ:
+        return EventOrigin.TEST
+    ci_env = os.environ.get("CI", "").strip().lower()
+    if ci_env in ("true", "1", "yes") or any(
+        k in os.environ
+        for k in ("GITHUB_ACTIONS", "GITLAB_CI", "TRAVIS", "CIRCLECI", "BITBUCKET_COMMIT", "TF_BUILD", "BUILD_BUILDID")
+    ):
+        return EventOrigin.CI
+    return EventOrigin.PRODUCTION
+
+
 DEFAULT_SOURCE_CONFIDENCE: dict[MeasurementSource, float] = {
     MeasurementSource.PROVIDER_EXACT: 1.0,
     MeasurementSource.CLI_EXACT: 1.0,
@@ -246,10 +288,16 @@ def compute_event_id(
     timestamp: str,
     metadata_json: str,
     task_id: str | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> str:
     """Generate a deterministic sha256 digest event ID for idempotency."""
     val_repr = "null" if value is None else f"{float(value):.6f}"
-    payload = f"{run_id or ''}:{task_id or ''}:{actor}:{event_type}:{measurement_type}:{unit}:{val_repr}:{timestamp}:{metadata_json}"
+    origin_part = ""
+    if origin is not None:
+        norm_orig = EventOrigin.from_value(origin).value
+        if norm_orig != EventOrigin.UNKNOWN.value:
+            origin_part = f":{norm_orig}"
+    payload = f"{run_id or ''}:{task_id or ''}:{actor}:{event_type}:{measurement_type}:{unit}:{val_repr}:{timestamp}:{metadata_json}{origin_part}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -269,12 +317,19 @@ class UsageEvent:
     run_id: str | None = None
     task_id: str | None = None
     project_dir: str | None = None
+    origin: EventOrigin | str | None = None
     timestamp: str = ""
     created_at: str = ""
 
     def __post_init__(self) -> None:
         # Validate / normalize measurement_source
         self.measurement_source = MeasurementSource.from_value(self.measurement_source)
+
+        # Validate / normalize origin
+        if self.origin is None:
+            self.origin = resolve_default_origin()
+        else:
+            self.origin = EventOrigin.from_value(self.origin)
 
         # Validate value and measurement_source consistency
         if self.measurement_source == MeasurementSource.UNAVAILABLE or self.value is None:
@@ -334,6 +389,7 @@ class UsageEvent:
                 self.timestamp,
                 meta_json,
                 task_id=self.task_id,
+                origin=self.origin,
             )
         else:
             self.event_id = str(self.event_id).strip()
@@ -352,6 +408,7 @@ class UsageEvent:
             "unit": self.unit,
             "measurement_source": self.measurement_source.value,
             "confidence": self.confidence,
+            "origin": self.origin.value if isinstance(self.origin, EventOrigin) else str(self.origin),
             "metadata": self.metadata,
             "timestamp": self.timestamp,
             "created_at": self.created_at,
@@ -364,6 +421,7 @@ class UsageEvent:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> UsageEvent:
         """Construct UsageEvent from a dictionary."""
+        origin = EventOrigin.from_value(d.get("origin")) if "origin" in d else EventOrigin.UNKNOWN
         return cls(
             actor=d.get("actor", "unknown"),
             event_type=d.get("event_type", "unknown"),
@@ -377,6 +435,7 @@ class UsageEvent:
             run_id=d.get("run_id"),
             task_id=d.get("task_id"),
             project_dir=d.get("project_dir"),
+            origin=origin,
             timestamp=d.get("timestamp", ""),
             created_at=d.get("created_at", ""),
         )
@@ -398,6 +457,7 @@ class UsageSummary:
     totals_by_actor: dict[str, dict[str, float]] = field(default_factory=dict)
     events_by_source: dict[str, int] = field(default_factory=dict)
     events_by_type: dict[str, int] = field(default_factory=dict)
+    events_by_origin: dict[str, int] = field(default_factory=dict)
     mean_confidence: float = 1.0
     weighted_confidence_by_unit: dict[str, float] = field(default_factory=dict)
     earliest_timestamp: str | None = None
@@ -438,6 +498,7 @@ class UsageSummary:
             "totals_by_actor": self.totals_by_actor,
             "events_by_source": self.events_by_source,
             "events_by_type": self.events_by_type,
+            "events_by_origin": self.events_by_origin,
             "mean_confidence": self.mean_confidence,
             "weighted_confidence_by_unit": self.weighted_confidence_by_unit,
             "earliest_timestamp": self.earliest_timestamp,
@@ -462,6 +523,7 @@ def aggregate_events(events: Iterable[UsageEvent]) -> UsageSummary:
     totals_by_actor: dict[str, dict[str, float]] = {}
     events_by_source: dict[str, int] = {}
     events_by_type: dict[str, int] = {}
+    events_by_origin: dict[str, int] = {}
 
     confidence_sum = 0.0
     unit_val_sum: dict[str, float] = {}
@@ -471,10 +533,12 @@ def aggregate_events(events: Iterable[UsageEvent]) -> UsageSummary:
     timestamps: list[str] = []
 
     for ev in event_list:
-        # Sources and types
+        # Sources, types, and origin
         src_val = ev.measurement_source.value
         events_by_source[src_val] = events_by_source.get(src_val, 0) + 1
         events_by_type[ev.event_type] = events_by_type.get(ev.event_type, 0) + 1
+        orig_val = ev.origin.value if isinstance(ev.origin, EventOrigin) else str(ev.origin)
+        events_by_origin[orig_val] = events_by_origin.get(orig_val, 0) + 1
 
         confidence_sum += ev.confidence
         if ev.timestamp:
@@ -534,6 +598,7 @@ def aggregate_events(events: Iterable[UsageEvent]) -> UsageSummary:
         totals_by_actor=totals_by_actor,
         events_by_source=events_by_source,
         events_by_type=events_by_type,
+        events_by_origin=events_by_origin,
         mean_confidence=mean_confidence,
         weighted_confidence_by_unit=weighted_confidence_by_unit,
         earliest_timestamp=earliest_timestamp,
@@ -618,6 +683,7 @@ class UsageLedger:
                     unit TEXT NOT NULL,
                     measurement_source TEXT NOT NULL,
                     confidence REAL NOT NULL,
+                    origin TEXT DEFAULT 'UNKNOWN',
                     timestamp TEXT NOT NULL,
                     metadata_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -629,6 +695,8 @@ class UsageLedger:
             cols = [row[1] for row in cur.execute("PRAGMA table_info(telemetry_events);").fetchall()]
             if "task_id" not in cols:
                 conn.execute("ALTER TABLE telemetry_events ADD COLUMN task_id TEXT;")
+            if "origin" not in cols:
+                conn.execute("ALTER TABLE telemetry_events ADD COLUMN origin TEXT DEFAULT 'UNKNOWN';")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_run_id ON telemetry_events(run_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_task_id ON telemetry_events(task_id);")
@@ -636,6 +704,7 @@ class UsageLedger:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_events(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_actor_event ON telemetry_events(actor, event_type);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_unit ON telemetry_events(unit);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_origin ON telemetry_events(origin);")
             conn.execute("COMMIT;")
             self._db_initialized = True
         except Exception:
@@ -674,8 +743,8 @@ class UsageLedger:
                         INSERT OR IGNORE INTO telemetry_events (
                             event_id, run_id, task_id, project_dir, actor, event_type,
                             measurement_type, value, unit, measurement_source,
-                            confidence, timestamp, metadata_json, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            confidence, origin, timestamp, metadata_json, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                         """,
                         (
                             ev.event_id,
@@ -689,6 +758,7 @@ class UsageLedger:
                             ev.unit,
                             ev.measurement_source.value,
                             ev.confidence,
+                            ev.origin.value if isinstance(ev.origin, EventOrigin) else str(ev.origin),
                             ev.timestamp,
                             meta_json,
                             ev.created_at,
@@ -710,6 +780,7 @@ class UsageLedger:
         unit: str,
         measurement_source: MeasurementSource | str = MeasurementSource.PROVIDER_EXACT,
         confidence: float | None = None,
+        origin: EventOrigin | str | None = None,
         metadata: dict[str, Any] | None = None,
         run_id: str | None = None,
         task_id: str | None = None,
@@ -729,6 +800,7 @@ class UsageLedger:
             unit=unit,
             measurement_source=src,
             confidence=conf,
+            origin=origin,
             metadata=metadata if metadata is not None else {},
             event_id=event_id or "",
             run_id=run_id,
@@ -748,15 +820,23 @@ class UsageLedger:
         measurement_type: str | None = None,
         unit: str | None = None,
         measurement_source: MeasurementSource | str | None = None,
+        origin: EventOrigin | str | Sequence[EventOrigin | str] | None = None,
         start_time: str | datetime | float | None = None,
         end_time: str | datetime | float | None = None,
         limit: int | None = None,
     ) -> list[UsageEvent]:
-        """Query usage events filtered by run_id, task_id, project, actor, type, unit, and time range."""
+        """Query usage events filtered by run_id, task_id, project, actor, type, unit, origin, and time range."""
         norm_project = normalize_project_path(project_dir)
         norm_src = MeasurementSource.from_value(measurement_source).value if measurement_source else None
         start_iso = _format_timestamp(start_time) if start_time is not None else None
         end_iso = _format_timestamp(end_time) if end_time is not None else None
+
+        allowed_origins: set[str] | None = None
+        if origin is not None:
+            if isinstance(origin, (list, tuple, set)):
+                allowed_origins = {EventOrigin.from_value(o).value for o in origin}
+            else:
+                allowed_origins = {EventOrigin.from_value(origin).value}
 
         with self._lock:
             if not self.in_memory and self.db_path is not None and self.db_path.exists():
@@ -785,6 +865,13 @@ class UsageLedger:
                 if norm_src is not None:
                     query_sql += " AND measurement_source = ?"
                     params.append(norm_src)
+                if allowed_origins is not None:
+                    placeholders = ",".join("?" for _ in allowed_origins)
+                    if EventOrigin.UNKNOWN.value in allowed_origins:
+                        query_sql += f" AND (origin IN ({placeholders}) OR origin IS NULL OR origin = '')"
+                    else:
+                        query_sql += f" AND origin IN ({placeholders})"
+                    params.extend(list(allowed_origins))
                 if start_iso is not None:
                     query_sql += " AND timestamp >= ?"
                     params.append(start_iso)
@@ -807,6 +894,7 @@ class UsageLedger:
                         meta = json.loads(row["metadata_json"])
                     except Exception:
                         meta = {}
+                    orig_val = row["origin"] if "origin" in row.keys() and row["origin"] else "UNKNOWN"
                     ev = UsageEvent(
                         event_id=row["event_id"],
                         run_id=row["run_id"],
@@ -819,6 +907,7 @@ class UsageLedger:
                         unit=row["unit"],
                         measurement_source=MeasurementSource.from_value(row["measurement_source"]),
                         confidence=float(row["confidence"]),
+                        origin=EventOrigin.from_value(orig_val),
                         metadata=meta,
                         timestamp=row["timestamp"],
                         created_at=row["created_at"],
@@ -845,6 +934,10 @@ class UsageLedger:
                     continue
                 if norm_src is not None and ev.measurement_source.value != norm_src:
                     continue
+                if allowed_origins is not None:
+                    ev_orig = ev.origin.value if isinstance(ev.origin, EventOrigin) else EventOrigin.from_value(ev.origin).value
+                    if ev_orig not in allowed_origins:
+                        continue
                 if start_iso is not None and ev.timestamp < start_iso:
                     continue
                 if end_iso is not None and ev.timestamp > end_iso:
@@ -866,6 +959,7 @@ class UsageLedger:
         measurement_type: str | None = None,
         unit: str | None = None,
         measurement_source: MeasurementSource | str | None = None,
+        origin: EventOrigin | str | Sequence[EventOrigin | str] | None = None,
         start_time: str | datetime | float | None = None,
         end_time: str | datetime | float | None = None,
     ) -> UsageSummary:
@@ -879,6 +973,7 @@ class UsageLedger:
             measurement_type=measurement_type,
             unit=unit,
             measurement_source=measurement_source,
+            origin=origin,
             start_time=start_time,
             end_time=end_time,
         )
@@ -889,9 +984,10 @@ class UsageLedger:
         run_id: str | None = None,
         task_id: str | None = None,
         project_dir: str | Path | None = None,
+        origin: EventOrigin | str | Sequence[EventOrigin | str] | None = None,
     ) -> list[dict[str, Any]]:
         """Export matching events as list of JSON-serializable dicts."""
-        events = self.query(run_id=run_id, task_id=task_id, project_dir=project_dir)
+        events = self.query(run_id=run_id, task_id=task_id, project_dir=project_dir, origin=origin)
         return [e.to_dict() for e in events]
 
     def clear(self) -> None:
@@ -916,6 +1012,8 @@ class UsageLedger:
 
 __all__ = [
     "MeasurementSource",
+    "EventOrigin",
+    "resolve_default_origin",
     "UsageEvent",
     "UsageSummary",
     "UsageLedger",

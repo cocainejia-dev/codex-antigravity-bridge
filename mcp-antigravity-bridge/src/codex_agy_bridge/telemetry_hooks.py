@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional, Sequence
 from .agy_runner import classify_agy_error
 from .telemetry import (
     DEFAULT_SOURCE_CONFIDENCE,
+    EventOrigin,
     MeasurementSource,
     UsageEvent,
     UsageLedger,
@@ -36,6 +37,7 @@ from .telemetry import (
     get_default_telemetry_db_path,
     normalize_project_path,
     redact_metadata,
+    resolve_default_origin,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,6 +157,7 @@ def record_run_start_event(
     project_dir: str | Path | None = None,
     db_path: str | Path | None = None,
     metadata: dict[str, Any] | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record durable run start lifecycle event and baseline monitoring turn count."""
     try:
@@ -169,6 +172,7 @@ def record_run_start_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -183,6 +187,7 @@ def record_run_start_event(
             unit="turns",
             measurement_source=MeasurementSource.DERIVED,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -202,6 +207,7 @@ def record_worker_launch_event(
     attempt: int = 0,
     repair_round: int = 0,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record worker launch event in durable run execution."""
     try:
@@ -221,6 +227,7 @@ def record_worker_launch_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -241,6 +248,7 @@ def record_worker_completion_event(
     last_error: str | None = None,
     verification_result: Any = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> list[UsageEvent]:
     """Record worker completion lifecycle events (duration, outcomes, diffs, unavailable tokens)."""
     events: list[UsageEvent] = []
@@ -269,6 +277,7 @@ def record_worker_completion_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -287,6 +296,7 @@ def record_worker_completion_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -305,6 +315,7 @@ def record_worker_completion_event(
                 unit="seconds",
                 measurement_source=MeasurementSource.CLI_EXACT,
                 confidence=1.0,
+                origin=origin,
                 run_id=run_id,
                 task_id=task_id,
                 project_dir=project_dir,
@@ -325,6 +336,7 @@ def record_worker_completion_event(
                 unit="files",
                 measurement_source=MeasurementSource.CLI_EXACT,
                 confidence=1.0,
+                origin=origin,
                 run_id=run_id,
                 task_id=task_id,
                 project_dir=project_dir,
@@ -341,6 +353,7 @@ def record_worker_completion_event(
                 unit="lines",
                 measurement_source=MeasurementSource.CLI_EXACT,
                 confidence=1.0,
+                origin=origin,
                 run_id=run_id,
                 task_id=task_id,
                 project_dir=project_dir,
@@ -358,6 +371,7 @@ def record_worker_completion_event(
             unit="tokens",
             measurement_source=MeasurementSource.UNAVAILABLE,
             confidence=0.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -375,6 +389,7 @@ def record_worker_completion_event(
             unit="turns",
             measurement_source=MeasurementSource.DERIVED,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -404,6 +419,7 @@ def record_worker_completion_event(
                     timeout_class=to_cls,
                     error_text=str(last_error),
                     db_path=db_path,
+                    origin=origin,
                 )
                 if ev_to:
                     events.append(ev_to)
@@ -422,6 +438,7 @@ def record_timeout_event(
     timeout_diagnostic: dict[str, Any] | None = None,
     error_text: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record timeout classification event with structured diagnostic evidence."""
     try:
@@ -443,6 +460,7 @@ def record_timeout_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -459,6 +477,7 @@ def record_account_switch_event(
     project_dir: str | Path | None = None,
     reason: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record account switch required lifecycle event."""
     try:
@@ -475,6 +494,7 @@ def record_account_switch_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -493,6 +513,7 @@ def record_run_resume_event(
     account_switched: bool = False,
     credentials_refreshed: bool = False,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record run resumption lifecycle event."""
     try:
@@ -511,6 +532,7 @@ def record_run_resume_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -528,6 +550,7 @@ def record_reconciliation_event(
     action: str | None = None,
     reason: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record state reconciliation observation event."""
     try:
@@ -545,6 +568,7 @@ def record_reconciliation_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -562,6 +586,7 @@ def record_retry_event(
     attempt: int = 0,
     reason: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record execution retry lifecycle event."""
     try:
@@ -579,6 +604,7 @@ def record_retry_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -594,6 +620,7 @@ def record_agy_job_start_event(
     task_key: str | None = None,
     workdir: str | Path | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record asynchronous AGY job start event."""
     try:
@@ -610,6 +637,7 @@ def record_agy_job_start_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -629,6 +657,7 @@ def record_agy_job_completion_event(
     result_text: str | None = None,
     error_text: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> list[UsageEvent]:
     """Record asynchronous AGY job completion metrics."""
     events: list[UsageEvent] = []
@@ -654,6 +683,7 @@ def record_agy_job_completion_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -671,6 +701,7 @@ def record_agy_job_completion_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -687,6 +718,7 @@ def record_agy_job_completion_event(
             unit="seconds",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -706,6 +738,7 @@ def record_agy_job_completion_event(
                 unit="files",
                 measurement_source=MeasurementSource.CLI_EXACT,
                 confidence=1.0,
+                origin=origin,
                 run_id=job_id,
                 project_dir=workdir,
                 metadata=meta,
@@ -721,6 +754,7 @@ def record_agy_job_completion_event(
                 unit="lines",
                 measurement_source=MeasurementSource.CLI_EXACT,
                 confidence=1.0,
+                origin=origin,
                 run_id=job_id,
                 project_dir=workdir,
                 metadata=meta,
@@ -738,6 +772,7 @@ def record_agy_job_completion_event(
                 timeout_class=error_kind or "TIMEOUT",
                 error_text=error_text,
                 db_path=db_path,
+                origin=origin,
             )
             if ev_to:
                 events.append(ev_to)
@@ -751,6 +786,7 @@ def record_agy_job_completion_event(
             unit="tokens",
             measurement_source=MeasurementSource.UNAVAILABLE,
             confidence=0.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -767,6 +803,7 @@ def record_agy_job_completion_event(
             unit="turns",
             measurement_source=MeasurementSource.DERIVED,
             confidence=1.0,
+            origin=origin,
             run_id=job_id,
             project_dir=workdir,
             metadata=meta,
@@ -787,6 +824,7 @@ def record_oneshot_call_event(
     exit_code: int = 0,
     error_kind: str | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> list[UsageEvent]:
     """Record metrics for synchronous one-shot agy_ask / agy_ask_json calls."""
     events: list[UsageEvent] = []
@@ -811,6 +849,7 @@ def record_oneshot_call_event(
             unit="calls",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             project_dir=workdir,
             metadata=meta,
         )
@@ -827,6 +866,7 @@ def record_oneshot_call_event(
             unit="count",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             project_dir=workdir,
             metadata=meta,
         )
@@ -842,6 +882,7 @@ def record_oneshot_call_event(
             unit="seconds",
             measurement_source=MeasurementSource.CLI_EXACT,
             confidence=1.0,
+            origin=origin,
             project_dir=workdir,
             metadata=meta,
         )
@@ -857,6 +898,7 @@ def record_oneshot_call_event(
             unit="tokens",
             measurement_source=MeasurementSource.UNAVAILABLE,
             confidence=0.0,
+            origin=origin,
             project_dir=workdir,
             metadata=meta,
         )
@@ -870,6 +912,7 @@ def record_oneshot_call_event(
                 timeout_class=error_kind,
                 error_text=f"Oneshot {error_kind}",
                 db_path=db_path,
+                origin=origin,
             )
             if ev_to:
                 events.append(ev_to)
@@ -887,6 +930,7 @@ def record_duplicate_quota_risk_event(
     reason: str | None = None,
     metadata: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record an observational duplicate quota risk event (DERIVED source, no token savings claimed)."""
     try:
@@ -906,6 +950,7 @@ def record_duplicate_quota_risk_event(
             unit="count",
             measurement_source=MeasurementSource.DERIVED,
             confidence=DEFAULT_SOURCE_CONFIDENCE.get(MeasurementSource.DERIVED, 0.9),
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -923,6 +968,7 @@ def record_avoided_duplicate_retry_event(
     reason: str | None = None,
     metadata: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> UsageEvent | None:
     """Record an observational avoided duplicate retry event (DERIVED source, no token savings claimed)."""
     try:
@@ -942,6 +988,7 @@ def record_avoided_duplicate_retry_event(
             unit="count",
             measurement_source=MeasurementSource.DERIVED,
             confidence=DEFAULT_SOURCE_CONFIDENCE.get(MeasurementSource.DERIVED, 0.9),
+            origin=origin,
             run_id=run_id,
             task_id=task_id,
             project_dir=project_dir,
@@ -953,6 +1000,8 @@ def record_avoided_duplicate_retry_event(
 
 
 __all__ = [
+    "EventOrigin",
+    "resolve_default_origin",
     "get_telemetry_ledger",
     "telemetry_path_for",
     "reset_telemetry_ledgers",

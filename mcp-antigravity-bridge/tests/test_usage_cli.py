@@ -23,6 +23,7 @@ import pytest  # noqa: E402
 from codex_agy_bridge import __main__ as bridge_main  # noqa: E402
 from codex_agy_bridge import usage_cli  # noqa: E402
 from codex_agy_bridge.telemetry import (  # noqa: E402
+    EventOrigin,
     MeasurementSource,
     UsageEvent,
     UsageLedger,
@@ -50,6 +51,12 @@ from codex_agy_bridge.usage_cli import (  # noqa: E402
     build_usage_report_data,
     format_human_report,
     main as usage_cli_main,
+)
+from codex_agy_bridge.usage_reports import (  # noqa: E402
+    find_latest_run,
+    get_default_reports_dir,
+    resolve_report_path,
+    write_stable_report,
 )
 
 
@@ -355,3 +362,227 @@ def test_bridge_main_usage_delegation(monkeypatch: pytest.MonkeyPatch):
     ret2 = bridge_main.main(["--usage", "--run", "run-999"])
     assert ret2 == 0
     assert called_with == [["--json"], ["--run", "run-999"]]
+
+
+def test_latest_production_selection(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Verify --latest selects the newest confirmed PRODUCTION run and ignores TEST/CI/UNKNOWN by default."""
+    db_path = tmp_path / "latest_test.sqlite3"
+
+    # 1. Older production run
+    record_run_start_event(
+        run_id="prod-run-old",
+        task_id="task-old",
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+    record_worker_completion_event(
+        run_id="prod-run-old",
+        task_id="task-old",
+        duration_seconds=10.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+
+    # 2. Newer confirmed production run
+    record_run_start_event(
+        run_id="prod-run-new",
+        task_id="task-new",
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+    record_worker_completion_event(
+        run_id="prod-run-new",
+        task_id="task-new",
+        duration_seconds=20.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+
+    # 3. Even newer TEST run
+    record_run_start_event(
+        run_id="test-run-newest",
+        task_id="task-test",
+        db_path=db_path,
+        origin=EventOrigin.TEST,
+    )
+    record_worker_completion_event(
+        run_id="test-run-newest",
+        task_id="task-test",
+        duration_seconds=5.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.TEST,
+    )
+
+    # 4. Even newer CI run
+    record_run_start_event(
+        run_id="ci-run-newest",
+        task_id="task-ci",
+        db_path=db_path,
+        origin=EventOrigin.CI,
+    )
+    record_worker_completion_event(
+        run_id="ci-run-newest",
+        task_id="task-ci",
+        duration_seconds=5.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.CI,
+    )
+
+    # 5. UNKNOWN origin run
+    record_run_start_event(
+        run_id="unknown-run",
+        task_id="task-unk",
+        db_path=db_path,
+        origin=EventOrigin.UNKNOWN,
+    )
+
+    # Test default --latest selection with JSON output
+    code = usage_cli_main(["--db", str(db_path), "--latest", "--json"])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["filters"]["latest"] is True
+    assert data["filters"]["latest_found"] is True
+    assert data["filters"]["run_id"] == "prod-run-new"
+    assert data["filters"]["latest_origin"] == "PRODUCTION"
+    assert all(e["run_id"] == "prod-run-new" for e in data["events"])
+
+    # Test default --latest with human report
+    code2 = usage_cli_main(["--db", str(db_path), "--latest"])
+    assert code2 == 0
+    human_out = capsys.readouterr().out
+    assert "prod-run-new" in human_out
+    assert "PRODUCTION" in human_out or "production" in human_out
+
+
+def test_latest_inclusion_flags(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Verify --include-test, --include-ci, and --include-unknown flags make non-production runs eligible."""
+    db_path = tmp_path / "inclusion_test.sqlite3"
+
+    # Production run
+    record_run_start_event(
+        run_id="prod-run",
+        task_id="task-prod",
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+    record_worker_completion_event(
+        run_id="prod-run",
+        task_id="task-prod",
+        duration_seconds=10.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.PRODUCTION,
+    )
+
+    # Newer TEST run
+    record_run_start_event(
+        run_id="test-run-newest",
+        task_id="task-test",
+        db_path=db_path,
+        origin=EventOrigin.TEST,
+    )
+    record_worker_completion_event(
+        run_id="test-run-newest",
+        task_id="task-test",
+        duration_seconds=5.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.TEST,
+    )
+
+    # Newer CI run
+    record_run_start_event(
+        run_id="ci-run-newest",
+        task_id="task-ci",
+        db_path=db_path,
+        origin=EventOrigin.CI,
+    )
+    record_worker_completion_event(
+        run_id="ci-run-newest",
+        task_id="task-ci",
+        duration_seconds=5.0,
+        success=True,
+        db_path=db_path,
+        origin=EventOrigin.CI,
+    )
+
+    # 1. With --include-test, test run is eligible
+    code_test = usage_cli_main(["--db", str(db_path), "--latest", "--include-test", "--json"])
+    assert code_test == 0
+    data_test = json.loads(capsys.readouterr().out)
+    assert data_test["filters"]["latest_found"] is True
+    assert data_test["filters"]["run_id"] in ("test-run-newest", "ci-run-newest")
+
+    # 2. With --include-ci, CI run is eligible
+    code_ci = usage_cli_main(["--db", str(db_path), "--latest", "--include-ci", "--json"])
+    assert code_ci == 0
+    data_ci = json.loads(capsys.readouterr().out)
+    assert data_ci["filters"]["latest_found"] is True
+
+
+def test_latest_no_production_found(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Verify behavior when --latest finds no production runs."""
+    db_path = tmp_path / "no_prod.sqlite3"
+
+    # Only record a TEST run
+    record_run_start_event(
+        run_id="test-only-run",
+        task_id="task-test-only",
+        db_path=db_path,
+        origin=EventOrigin.TEST,
+    )
+
+    # 1. Human mode
+    code1 = usage_cli_main(["--db", str(db_path), "--latest"])
+    assert code1 == 0
+    human_out = capsys.readouterr().out
+    assert "No confirmed production run found" in human_out
+    assert "TEST, CI, and UNKNOWN runs are excluded by default." in human_out
+
+    # 2. JSON mode
+    code2 = usage_cli_main(["--db", str(db_path), "--latest", "--json"])
+    assert code2 == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["filters"]["latest"] is True
+    assert data["filters"]["latest_found"] is False
+    assert "No confirmed production run found" in data["message"]
+    assert data["summary"]["event_count"] == 0
+
+    # 3. HTML mode
+    html_file = tmp_path / "no_prod.html"
+    code3 = usage_cli_main(["--db", str(db_path), "--latest", "--html", str(html_file)])
+    assert code3 == 0
+    assert html_file.exists()
+    html_content = html_file.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in html_content
+    assert '<html lang="zh-CN">' in html_content
+
+
+def test_stable_report_path_unicode_and_spaces(tmp_path: Path):
+    """Verify exact report path resolution and Path.as_uri handling with Unicode and spaces."""
+    nested_unicode_dir = tmp_path / "测试 项目 目录 2026" / "子目录 with spaces"
+    target_file = nested_unicode_dir / "运行 报告.html"
+    alias_file = nested_unicode_dir / "latest.html"
+    content = "<!DOCTYPE html><html lang=\"zh-CN\"><body>测试内容</body></html>"
+
+    target, target_uri, alias, alias_uri = write_stable_report(
+        html_content=content,
+        target_path=target_file,
+        alias_path=alias_file,
+    )
+
+    assert target.exists()
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == content
+    assert target_uri.startswith("file://")
+    assert "%20" in target_uri or " " in target_uri
+    assert target_uri == target.as_uri()
+
+    assert alias is not None and alias.exists()
+    assert alias.read_text(encoding="utf-8") == content
+    assert alias_uri is not None and alias_uri.startswith("file://")
+    assert alias_uri == alias.as_uri()

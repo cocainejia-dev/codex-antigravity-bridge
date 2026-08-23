@@ -1,15 +1,15 @@
 """Lightweight stdlib-only HTML usage telemetry report and visualization generator.
 
-Generates deterministic, zero-dependency, self-contained HTML reports for
+Generates deterministic, zero-dependency, self-contained Chinese HTML reports for
 Codex <-> Antigravity Bridge usage telemetry with:
+- HTML default Chinese (html lang="zh-CN") with Chinese headings and explanatory text
+- Clearly labeled call share as 调用占比 / DERIVED (never workload/token/cost share)
+- Explicit EXACT, DERIVED/ESTIMATED, and UNAVAILABLE semantics
+- Token and quota unavailable explanation in Chinese
 - Strict HTML escaping for secret and XSS safety
 - Zero external assets (embedded CSS, system fonts, no external JS/CDN requests)
-- Single-run and project-level totals
-- Codex vs Antigravity measurable workload comparison
-- Clear labeling for EXACT, ESTIMATED/DERIVED, and UNAVAILABLE measurements
-- Operational breakdown: Retries, Timeouts, Account Switches, Duplicate Quota Metrics
 - Safe mixed-unit display (no incompatible unit summation)
-- Safe, deterministic file writing
+- Safe, deterministic, concurrency-safe file writing
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .telemetry import MeasurementSource, deterministic_json_dumps
+from .usage_reports import resolve_report_path, write_stable_report
 
 
 def _esc(val: Any) -> str:
@@ -43,7 +44,7 @@ def _format_num(val: Any, decimals: int = 2) -> str:
 
 
 def generate_html_report(report_data: dict[str, Any]) -> str:
-    """Generate deterministic, self-contained HTML report from usage report data dictionary."""
+    """Generate deterministic, self-contained Chinese HTML report from usage report data dictionary."""
     filters = report_data.get("filters", {})
     summary = report_data.get("summary", {})
     codex = report_data.get("codex", {})
@@ -63,6 +64,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     since = filters.get("since")
     until = filters.get("until")
     db_path = filters.get("db_path", ":memory:")
+    is_latest = filters.get("latest", False)
 
     event_count = summary.get("event_count", 0)
     unavail_count = summary.get("unavailable_count", 0)
@@ -94,10 +96,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     totals_unit = summary.get("totals_by_unit", {})
     src_map = sources.get("events_by_source", {})
 
-    # Workload ratio calculation
-    total_workload_calls = (a_calls + c_calls) if (a_calls + c_calls) > 0 else 1
-    agy_call_pct = round((a_calls / total_workload_calls) * 100, 1)
-    codex_call_pct = round((c_calls / total_workload_calls) * 100, 1)
+    # Call share calculation (strictly labeled as 调用占比 / DERIVED, never workload/token/cost share)
+    total_calls = (a_calls + c_calls) if (a_calls + c_calls) > 0 else 1
+    agy_call_pct = round((a_calls / total_calls) * 100, 1) if (a_calls + c_calls) > 0 else 50.0
+    codex_call_pct = round((c_calls / total_calls) * 100, 1) if (a_calls + c_calls) > 0 else 50.0
 
     # Build Unit Totals Table Rows
     unit_rows: list[str] = []
@@ -114,7 +116,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
                 f"</tr>"
             )
     else:
-        unit_rows.append("<tr><td colspan='4' class='text-muted text-center'>No measurable unit totals recorded</td></tr>")
+        unit_rows.append("<tr><td colspan='4' class='text-muted text-center'>未记录可测量单位总计</td></tr>")
 
     # Build Timeouts by Class List
     timeout_class_items: list[str] = []
@@ -125,7 +127,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
                 f"<div class='pill-item'><span>{_esc(cls_name)}</span><strong class='font-mono'>{cnt}</strong></div>"
             )
     else:
-        timeout_class_items.append("<span class='text-muted'>No timeouts recorded</span>")
+        timeout_class_items.append("<span class='text-muted'>未记录超时事件</span>")
 
     # Build Source Distribution Rows
     source_rows: list[str] = []
@@ -142,7 +144,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
                 f"</tr>"
             )
     else:
-        source_rows.append("<tr><td colspan='3' class='text-muted text-center'>No source events recorded</td></tr>")
+        source_rows.append("<tr><td colspan='3' class='text-muted text-center'>未记录来源事件</td></tr>")
 
     # Build Events Table Rows
     event_rows: list[str] = []
@@ -157,6 +159,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         unit = ev.get("unit", "")
         msrc = ev.get("measurement_source", "")
         conf = ev.get("confidence", 1.0)
+        orig = ev.get("origin", "")
         meta_json = deterministic_json_dumps(ev.get("metadata", {}))
 
         badge_src_cls = "badge-exact" if "EXACT" in msrc else ("badge-derived" if "DERIVED" in msrc else "badge-unavail")
@@ -176,15 +179,15 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
             f"</tr>"
         )
     if not event_rows:
-        event_rows.append("<tr><td colspan='9' class='text-muted text-center'>No telemetry events found matching filters</td></tr>")
+        event_rows.append("<tr><td colspan='9' class='text-muted text-center'>未找到符合过滤条件的遥测事件</td></tr>")
 
-    # Construct complete deterministic HTML
+    # Construct complete deterministic Chinese HTML
     html_output = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Codex &lt;-&gt; Antigravity Bridge Usage Telemetry</title>
+<title>Codex &lt;-&gt; Antigravity 运行观测指标报告</title>
 <style>
   :root {{
     --bg-page: #0b0f19;
@@ -212,7 +215,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
   body {{
     background-color: var(--bg-page);
     color: var(--text-main);
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
     line-height: 1.5;
     padding: 24px;
   }}
@@ -288,11 +291,11 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     background: var(--bg-card-alt);
     border-radius: 6px;
     overflow: hidden;
-    height: 24px;
+    height: 28px;
     display: flex;
   }}
-  .bar-agy {{ background: var(--accent-purple); height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #ffffff; }}
-  .bar-codex {{ background: var(--accent-blue); height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #ffffff; }}
+  .bar-agy {{ background: var(--accent-purple); height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #ffffff; }}
+  .bar-codex {{ background: var(--accent-blue); height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #ffffff; }}
 
   .disclaimer-box {{
     background: rgba(56, 189, 248, 0.05);
@@ -359,95 +362,95 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
 <body>
 <div class="container">
   <header>
-    <h1>Codex &lt;-&gt; Antigravity Bridge Usage Telemetry</h1>
-    <div class="subtitle">Observational Telemetry Report &amp; Workload Attribution Visualization</div>
+    <h1>Codex &lt;-&gt; Antigravity Bridge 使用观测指标</h1>
+    <div class="subtitle">观测遥测报告与调用占比可视化</div>
     <div class="filter-bar">
-      <div class="filter-item"><span class="filter-label">Run ID:</span><span class="filter-value">{_esc(run_id or 'ALL')}</span></div>
-      <div class="filter-item"><span class="filter-label">Task ID:</span><span class="filter-value">{_esc(task_id or 'ALL')}</span></div>
-      <div class="filter-item"><span class="filter-label">Project:</span><span class="filter-value">{_esc(project_dir or 'ALL')}</span></div>
-      <div class="filter-item"><span class="filter-label">Database:</span><span class="filter-value">{_esc(db_path)}</span></div>
-      <div class="filter-item"><span class="filter-label">Events:</span><span class="filter-value">{event_count} (Unavailable: {unavail_count})</span></div>
+      <div class="filter-item"><span class="filter-label">运行 ID:</span><span class="filter-value">{_esc(run_id or '全部 (未过滤)')}</span></div>
+      <div class="filter-item"><span class="filter-label">任务 ID:</span><span class="filter-value">{_esc(task_id or '全部')}</span></div>
+      <div class="filter-item"><span class="filter-label">项目目录:</span><span class="filter-value">{_esc(project_dir or '全部')}</span></div>
+      <div class="filter-item"><span class="filter-label">数据库:</span><span class="filter-value">{_esc(db_path)}</span></div>
+      <div class="filter-item"><span class="filter-label">事件总数:</span><span class="filter-value">{event_count} (不可用数据点: {unavail_count})</span></div>
     </div>
   </header>
 
   <div class="badge-legend">
-    <span class="filter-label">Metric Confidence &amp; Source Legend:</span>
-    <span class="badge badge-exact">EXACT</span><span class="text-muted">Direct CLI/process measurement</span>
-    <span class="badge badge-derived">ESTIMATED / DERIVED</span><span class="text-muted">Derived observational metric (never claiming token savings)</span>
-    <span class="badge badge-unavail">UNAVAILABLE</span><span class="text-muted">Provider tokens/quotas not directly observable</span>
+    <span class="filter-label">置信度与指标来源图例:</span>
+    <span class="badge badge-exact">EXACT</span><span class="text-muted">直接测量 / 进程指标</span>
+    <span class="badge badge-derived">DERIVED / ESTIMATED</span><span class="text-muted">观测衍生指标（非模型提供商计费数据）</span>
+    <span class="badge badge-unavail">UNAVAILABLE</span><span class="text-muted">不可用（模型提供商 Token / 配额未直接提供或不可直接观测）</span>
   </div>
 
   <div class="grid grid-4">
     <!-- Antigravity Workload Card -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Antigravity Execution</span>
+        <span class="card-title">Antigravity 执行指标</span>
         <span class="badge badge-exact">EXACT</span>
       </div>
       <div class="stat-primary">{_format_num(a_secs)}s</div>
       <ul class="stat-list">
-        <li><span class="text-muted">Calls / Launches</span><strong class="font-mono">{a_calls} calls</strong></li>
-        <li><span class="text-muted">Success / Failure</span><strong class="font-mono">{a_succ} / {a_fail}</strong></li>
-        <li><span class="text-muted">Changed Files</span><strong class="font-mono">{a_files} files</strong></li>
-        <li><span class="text-muted">Lines of Code (Diff)</span><strong class="font-mono">{a_lines} lines</strong></li>
+        <li><span class="text-muted">调用次数 / 启动</span><strong class="font-mono">{a_calls} 次调用</strong></li>
+        <li><span class="text-muted">成功 / 失败</span><strong class="font-mono">{a_succ} / {a_fail}</strong></li>
+        <li><span class="text-muted">变更文件数</span><strong class="font-mono">{a_files} 个文件</strong></li>
+        <li><span class="text-muted">代码差异行数</span><strong class="font-mono">{a_lines} 行</strong></li>
       </ul>
     </div>
 
     <!-- Codex Monitoring Card -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Codex Supervision</span>
+        <span class="card-title">Codex 监督指标</span>
         <span class="badge badge-derived">DERIVED</span>
       </div>
-      <div class="stat-primary">{_format_num(c_turns)} turns</div>
+      <div class="stat-primary">{_format_num(c_turns)} 轮次</div>
       <ul class="stat-list">
-        <li><span class="text-muted">Launches / Steps</span><strong class="font-mono">{c_calls} calls</strong></li>
-        <li><span class="text-muted">Monitoring Baseline</span><strong class="font-mono">{_format_num(c_turns)} turns</strong></li>
-        <li><span class="text-muted">Resumptions</span><strong class="font-mono">{c_res} count</strong></li>
+        <li><span class="text-muted">调用次数 / 启动</span><strong class="font-mono">{c_calls} 次调用</strong></li>
+        <li><span class="text-muted">监督轮次基线</span><strong class="font-mono">{_format_num(c_turns)} 轮次</strong></li>
+        <li><span class="text-muted">恢复重试次数</span><strong class="font-mono">{c_res} 次</strong></li>
       </ul>
     </div>
 
     <!-- Operational Reliability Card -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Operational Events</span>
+        <span class="card-title">运行可靠性事件</span>
         <span class="badge badge-exact">EXACT</span>
       </div>
-      <div class="stat-primary">{r_count + to_count + as_count} events</div>
+      <div class="stat-primary">{r_count + to_count + as_count} 个事件</div>
       <ul class="stat-list">
-        <li><span class="text-muted">Retries</span><strong class="font-mono">{r_count} count</strong></li>
-        <li><span class="text-muted">Timeouts</span><strong class="font-mono">{to_count} count</strong></li>
-        <li><span class="text-muted">Account Switches</span><strong class="font-mono">{as_count} count</strong></li>
+        <li><span class="text-muted">重试次数</span><strong class="font-mono">{r_count} 次</strong></li>
+        <li><span class="text-muted">超时次数</span><strong class="font-mono">{to_count} 次</strong></li>
+        <li><span class="text-muted">账号切换次数</span><strong class="font-mono">{as_count} 次</strong></li>
       </ul>
     </div>
 
     <!-- Duplicate Quota Metrics Card -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Duplicate Quota Metrics</span>
+        <span class="card-title">重复配额风险指标</span>
         <span class="badge badge-derived">{_esc(dup_source)}</span>
       </div>
-      <div class="stat-primary">{dup_risk} risks</div>
+      <div class="stat-primary">{dup_risk} 次风险</div>
       <ul class="stat-list">
-        <li><span class="text-muted">Duplicate Quota Risks</span><strong class="font-mono">{dup_risk} count</strong></li>
-        <li><span class="text-muted">Avoided Retries</span><strong class="font-mono">{dup_avoided} count</strong></li>
-        <li><span class="text-muted">Savings Claim</span><span class="badge badge-unavail">UNAVAILABLE</span></li>
+        <li><span class="text-muted">重复配额风险</span><strong class="font-mono">{dup_risk} 次</strong></li>
+        <li><span class="text-muted">已避免重复重试</span><strong class="font-mono">{dup_avoided} 次</strong></li>
+        <li><span class="text-muted">Token/配额节省声明</span><span class="badge badge-unavail">UNAVAILABLE</span></li>
       </ul>
     </div>
   </div>
 
-  <!-- Workload Attribution & Comparison -->
+  <!-- Call Share Breakdown (Strictly 调用占比 / DERIVED, never workload/token/cost share) -->
   <div class="card" style="margin-bottom: 24px;">
     <div class="card-header">
-      <span class="card-title">Measurable Workload Attribution Breakdown</span>
-      <span class="badge badge-derived">ESTIMATED</span>
+      <span class="card-title">调用占比分析 (Call Share)</span>
+      <span class="badge badge-derived">DERIVED</span>
     </div>
     <div class="workload-bar-container">
-      <div class="bar-agy" style="width: {agy_call_pct}%;">Antigravity ({agy_call_pct}%)</div>
-      <div class="bar-codex" style="width: {codex_call_pct}%;">Codex ({codex_call_pct}%)</div>
+      <div class="bar-agy" style="width: {agy_call_pct}%;">Antigravity 调用占比 ({agy_call_pct}%)</div>
+      <div class="bar-codex" style="width: {codex_call_pct}%;">Codex 调用占比 ({codex_call_pct}%)</div>
     </div>
     <div class="disclaimer-box">
-      <strong>Workload Attribution Basis:</strong> Workload distribution is DERIVED/ESTIMATED strictly from recorded measurable workload (execution duration, calls, monitoring turns, worktree diff LOC). No provider-token savings or synthetic cost discount claims are made.
+      <strong>指标说明：</strong>调用占比完全基于记录的实际可测量观测数据（执行时长、调用次数、监督轮次、工作区代码差异等）衍生计算（DERIVED），不作任何模型提供商 Token 节省或虚假成本折扣断言。模型提供商 Token 与配额指标不可直接观测（UNAVAILABLE）。
     </div>
   </div>
 
@@ -455,16 +458,16 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     <!-- Totals by Unit (Mixed-Unit Safe) -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Recorded Totals by Unit (Mixed-Unit Safe)</span>
+        <span class="card-title">按单位汇总统计 (安全隔离单位)</span>
         <span class="badge badge-exact">EXACT</span>
       </div>
       <table style="margin-top: 8px;">
         <thead>
           <tr>
-            <th>Unit</th>
-            <th class="text-right">Total Recorded</th>
-            <th class="text-right">Weighted Conf</th>
-            <th>Label</th>
+            <th>计量单位</th>
+            <th class="text-right">记录总值</th>
+            <th class="text-right">加权置信度</th>
+            <th>指标分类</th>
           </tr>
         </thead>
         <tbody>
@@ -476,15 +479,15 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     <!-- Reliability & Sources -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Measurement Sources &amp; Confidence</span>
-        <span class="badge badge-derived">CONFIDENCE: {_format_num(mean_conf, 4)}</span>
+        <span class="card-title">测量来源分布与置信度</span>
+        <span class="badge badge-derived">置信度: {_format_num(mean_conf, 4)}</span>
       </div>
       <table style="margin-top: 8px;">
         <thead>
           <tr>
-            <th>Measurement Source</th>
-            <th class="text-right">Events</th>
-            <th class="text-right">Percentage</th>
+            <th>数据来源</th>
+            <th class="text-right">事件数</th>
+            <th class="text-right">占比</th>
           </tr>
         </thead>
         <tbody>
@@ -492,7 +495,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         </tbody>
       </table>
       <div style="margin-top: 16px;">
-        <span class="filter-label">Timeout Classification Breakdown:</span>
+        <span class="filter-label">超时分类明细:</span>
         <div class="pill-container">
           {''.join(timeout_class_items)}
         </div>
@@ -503,22 +506,22 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
   <!-- Telemetry Events Table -->
   <div class="card">
     <div class="card-header">
-      <span class="card-title">Recorded Observational Telemetry Events ({len(events)})</span>
-      <span class="badge badge-exact">LOG JOURNAL</span>
+      <span class="card-title">观测遥测事件日志 ({len(events)})</span>
+      <span class="badge badge-exact">日志流水</span>
     </div>
     <div class="table-responsive" style="margin-top: 8px; max-height: 480px; overflow-y: auto;">
       <table>
         <thead>
           <tr>
             <th>ID</th>
-            <th>Timestamp</th>
-            <th>Actor</th>
-            <th>Event Type</th>
-            <th>Measurement Type</th>
-            <th class="text-right">Value</th>
-            <th>Source</th>
-            <th class="text-right">Conf</th>
-            <th>Metadata Summary</th>
+            <th>时间戳</th>
+            <th>主体</th>
+            <th>事件类型</th>
+            <th>测量类型</th>
+            <th class="text-right">数值</th>
+            <th>来源</th>
+            <th class="text-right">置信度</th>
+            <th>元数据摘要</th>
           </tr>
         </thead>
         <tbody>
@@ -534,16 +537,22 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     return html_output
 
 
-def write_html_report(html_content: str, target_path: str | Path) -> Path:
-    """Safely write HTML visualization report to the requested file path.
+def write_html_report(
+    html_content: str,
+    target_path: str | Path,
+    alias_path: str | Path | None = None,
+) -> Path:
+    """Safely write HTML visualization report to target path using write_stable_report.
 
-    Creates parent directories if necessary and writes UTF-8 encoded text.
-    Guaranteed to only write to the specified target path.
+    Creates parent directories if necessary and writes UTF-8 encoded text atomically.
+    Guaranteed to preserve existing reports.
     """
-    path = Path(target_path).expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(html_content, encoding="utf-8")
-    return path
+    target, _uri, _alias, _alias_uri = write_stable_report(
+        html_content=html_content,
+        target_path=target_path,
+        alias_path=alias_path,
+    )
+    return target
 
 
 __all__ = [

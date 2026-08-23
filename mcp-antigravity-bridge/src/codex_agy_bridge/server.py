@@ -495,7 +495,47 @@ def run_result(
         raise ValueError("run_id must be a non-empty string")
     manager = DurableRunManager(valid_db_path)
     record = manager.run_result(run_id.strip())
-    return json.dumps(record.to_dict(), ensure_ascii=False)
+    payload = record.to_dict()
+
+    try:
+        from .telemetry_hooks import get_telemetry_ledger, telemetry_path_for
+        from .usage_cli import build_usage_report_data
+        from .usage_reports import resolve_report_path, write_stable_report
+        from .usage_visualization import generate_html_report
+
+        telemetry_db = telemetry_path_for(valid_db_path)
+        ledger = get_telemetry_ledger(telemetry_db)
+
+        report_data = build_usage_report_data(
+            ledger=ledger,
+            run_id=record.run_id,
+            db_path_str=str(telemetry_db),
+        )
+        html_content = generate_html_report(report_data)
+        target_path, _alias = resolve_report_path(
+            run_id=record.run_id,
+            is_latest=False,
+        )
+        out_file, target_uri, _alias_path, _alias_uri = write_stable_report(
+            html_content=html_content,
+            target_path=target_path,
+        )
+        payload["usage_report_status"] = "READY"
+        payload["usage_report_path"] = str(out_file.resolve())
+        payload["usage_report_uri"] = target_uri
+        payload["usage_report_reason"] = None
+    except Exception as exc:
+        try:
+            from .telemetry import redact_metadata
+            safe_reason = redact_metadata({"error": str(exc)})["error"]
+        except Exception:
+            safe_reason = "Usage report generation failed"
+        payload["usage_report_status"] = "FAILED"
+        payload["usage_report_path"] = None
+        payload["usage_report_uri"] = None
+        payload["usage_report_reason"] = f"Failed to generate usage report: {safe_reason}"
+
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @mcp.tool()
