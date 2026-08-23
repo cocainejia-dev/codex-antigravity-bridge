@@ -627,6 +627,7 @@ class DurableRunStore:
 class _ActiveExecution:
     cancel_event: threading.Event
     thread: threading.Thread | None = None
+    cancel_reason: str | None = None
 
 
 def _evaluate_obs_timeout_diagnostic(
@@ -802,6 +803,20 @@ class DurableRunManager:
             run_id = record.run_id
 
             try:
+                if cancel_event.is_set():
+                    cancel_reason = "Cancelled before execution"
+                    with self._active_lock:
+                        active = self._active_executions.get(run_id)
+                        if active is not None and active.cancel_reason is not None:
+                            cancel_reason = active.cancel_reason
+                    self.store.transition_run(
+                        run_id,
+                        expected_version=current_version,
+                        target_state=RunState.CANCELLED,
+                        last_error=cancel_reason,
+                    )
+                    return
+
                 # Transition CREATED -> QUEUED
                 queued_record = self.store.transition_run(
                     run_id,
@@ -811,11 +826,16 @@ class DurableRunManager:
                 current_version = queued_record.state_version
 
                 if cancel_event.is_set():
+                    cancel_reason = "Cancelled before execution"
+                    with self._active_lock:
+                        active = self._active_executions.get(run_id)
+                        if active is not None and active.cancel_reason is not None:
+                            cancel_reason = active.cancel_reason
                     self.store.transition_run(
                         run_id,
                         expected_version=current_version,
                         target_state=RunState.CANCELLED,
-                        last_error="Cancelled before execution",
+                        last_error=cancel_reason,
                     )
                     return
 
@@ -863,11 +883,16 @@ class DurableRunManager:
                 if cancel_event.is_set():
                     latest = self.store.get_run(run_id)
                     if latest and latest.state not in TERMINAL_STATES:
+                        cancel_reason = "Worker cancelled cooperatively"
+                        with self._active_lock:
+                            active = self._active_executions.get(run_id)
+                            if active is not None and active.cancel_reason is not None:
+                                cancel_reason = active.cancel_reason
                         self.store.transition_run(
                             run_id,
                             expected_version=latest.state_version,
                             target_state=RunState.CANCELLED,
-                            last_error="Worker cancelled cooperatively",
+                            last_error=cancel_reason,
                         )
                     return
 
@@ -1296,6 +1321,7 @@ class DurableRunManager:
         with self._active_lock:
             active = self._active_executions.get(run_id)
             if active is not None:
+                active.cancel_reason = reason
                 active.cancel_event.set()
 
         record = self.store.get_run(run_id)

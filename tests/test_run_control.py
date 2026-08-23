@@ -584,3 +584,59 @@ def test_external_process_observation_liveness_and_stale(tmp_path: Path) -> None
     assert obs_alive.recovery_state is None
 
 
+def test_run_cancel_pre_execution_preserves_custom_reason(tmp_path: Path) -> None:
+    """Verify that when cancellation is requested before worker execution, the caller reason is preserved."""
+    db_file = tmp_path / "pre_exec_cancel.sqlite3"
+    manager = DurableRunManager(db_file)
+    contract = _create_sample_contract(task_id="task-pre-exec-cancel")
+
+    worker_entered = threading.Event()
+    worker_hold = threading.Event()
+
+    def blocked_worker(ctx: WorkerContext) -> WorkerResult:
+        worker_entered.set()
+        worker_hold.wait(timeout=2.0)
+        return WorkerResult(success=True)
+
+    record = manager.run_start(contract, worker=blocked_worker)
+    custom_reason = "Explicit pre-execution cancellation reason"
+    cancelled = manager.run_cancel(record.run_id, reason=custom_reason)
+    assert cancelled.state == RunState.CANCELLED
+    assert cancelled.last_error == custom_reason
+
+    terminal = manager.run_wait(record.run_id, timeout=2.0)
+    assert terminal.state == RunState.CANCELLED
+    assert terminal.last_error == custom_reason
+
+    result = manager.run_result(record.run_id)
+    assert result.state == RunState.CANCELLED
+    assert result.last_error == custom_reason
+
+    worker_hold.set()
+
+
+def test_run_cancel_pre_execution_race_under_load(tmp_path: Path) -> None:
+    """Verify that rapid concurrent start and cancel consistently preserves caller reason under race conditions."""
+    db_file = tmp_path / "rapid_cancel_race.sqlite3"
+    manager = DurableRunManager(db_file)
+
+    for i in range(25):
+        task_id = f"task-race-{i}"
+        contract = _create_sample_contract(task_id=task_id)
+        reason = f"Race test cancellation reason #{i}"
+
+        def fast_worker(ctx: WorkerContext) -> WorkerResult:
+            time.sleep(0.01)
+            return WorkerResult(success=True)
+
+        record = manager.run_start(contract, worker=fast_worker)
+        cancelled = manager.run_cancel(record.run_id, reason=reason)
+        assert cancelled.state == RunState.CANCELLED
+
+        terminal = manager.run_wait(record.run_id, timeout=2.0)
+        assert terminal.state == RunState.CANCELLED
+        assert terminal.last_error == reason
+
+        result = manager.run_result(record.run_id)
+        assert result.state == RunState.CANCELLED
+        assert result.last_error == reason
