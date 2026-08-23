@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 # Ensure package import from mcp-antigravity-bridge/src
@@ -15,10 +15,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import pytest
-
 from codex_agy_bridge.contracts import (
     AutoCommitPolicy,
-    InvalidStateTransitionError,
     RiskClass,
     RunRecord,
     RunState,
@@ -27,13 +25,11 @@ from codex_agy_bridge.contracts import (
 from codex_agy_bridge.run_control import (
     ConcurrentModificationError,
     CredentialSecurityError,
+    DuplicateRunError,
     DurableRunManager,
     DurableRunStore,
-    DuplicateRunError,
-    RunControlError,
     RunNotFoundError,
     RunNotTerminalError,
-    WorkerCallback,
     WorkerContext,
     WorkerResult,
     is_pid_alive,
@@ -420,7 +416,7 @@ def test_list_runs_filtering(tmp_path: Path) -> None:
     c2 = _create_sample_contract(task_id="task-list-2")
 
     r1 = manager.run_start(c1, auto_spawn=False)
-    r2 = manager.run_start(c2, auto_spawn=False)
+    manager.run_start(c2, auto_spawn=False)
 
     all_runs = manager.list_runs()
     assert len(all_runs) == 2
@@ -548,6 +544,8 @@ def test_manager_recreation_preserves_active_in_process_worker(tmp_path: Path) -
 
     # Unblock the background thread for clean teardown
     worker_hold.set()
+    terminal = manager2.run_wait(record.run_id, timeout=5.0)
+    assert terminal.state == RunState.COMPLETE
 
 
 def test_missing_shared_worker_still_enters_recovery(tmp_path: Path) -> None:

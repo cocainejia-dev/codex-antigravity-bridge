@@ -644,9 +644,13 @@ def test_persistence_degraded_watchdog_survival_and_worker_completion(monkeypatc
                 raise sqlite3.OperationalError("disk I/O error simulation")
 
             registry._store.update_heartbeat = failing_update
+            registry._watchdog_wake_event.set()
 
             # Wait for watchdog to tick and encounter the failure
-            time.sleep(0.12)
+            _wait_until(
+                lambda: registry.status(job_id).get("supervision_persistence") == "degraded",
+                timeout=5.0,
+            )
 
             status = registry.status(job_id)
             assert status["state"] == "running"
@@ -659,9 +663,13 @@ def test_persistence_degraded_watchdog_survival_and_worker_completion(monkeypatc
 
             # Restore store functionality
             registry._store.update_heartbeat = orig_update
-            time.sleep(0.1)
+            registry._watchdog_wake_event.set()
 
             # Next watchdog tick clears degraded signal
+            _wait_until(
+                lambda: "supervision_persistence" not in registry.status(job_id),
+                timeout=5.0,
+            )
             status_recovered = registry.status(job_id)
             assert status_recovered["state"] == "running"
             assert "supervision_persistence" not in status_recovered
