@@ -1,4 +1,4 @@
-﻿"""Deterministic tests for codex-agy-bridge doctor diagnostics."""
+"""Deterministic tests for codex-agy-bridge doctor diagnostics."""
 
 from __future__ import annotations
 
@@ -25,6 +25,11 @@ from codex_agy_bridge.doctor import (
     check_runtime_provenance,
     check_skill_installation,
     check_windows_conpty,
+    check_usage_ledger,
+    check_token_usage_source,
+    check_quota_usage_source,
+    check_telemetry_storage,
+    check_secret_redaction,
     format_report_text,
     run_doctor,
 )
@@ -426,7 +431,7 @@ def test_run_doctor_all_pass(tmp_path: Path) -> None:
     )
 
     assert report.overall_status == CheckStatus.PASS
-    assert len(report.checks) == 13
+    assert len(report.checks) == 18
     assert all(c.status == CheckStatus.PASS for c in report.checks)
 
 
@@ -549,3 +554,80 @@ def test_setup_main_doctor_delegation(monkeypatch: pytest.MonkeyPatch) -> None:
     ret2 = setup.main(["--doctor"])
     assert ret2 == 0
     assert called_with == [[], []]
+
+
+def test_check_usage_ledger_pass() -> None:
+    res = check_usage_ledger()
+    assert res.status == CheckStatus.PASS
+    assert "operational" in res.details
+
+
+def test_check_usage_ledger_fail() -> None:
+    res = check_usage_ledger(ledger_factory=lambda: (False, "SQLite lock error"))
+    assert res.status == CheckStatus.FAIL
+    assert "SQLite lock error" in res.details
+    assert res.what_to_do_next is not None
+
+
+def test_check_token_usage_source_default() -> None:
+    res = check_token_usage_source()
+    assert res.status == CheckStatus.PASS
+    assert "UNAVAILABLE" in res.details
+
+
+def test_check_token_usage_source_custom_pass() -> None:
+    res = check_token_usage_source(source_checker=lambda: (True, "mock token source", None))
+    assert res.status == CheckStatus.PASS
+    assert "mock token source" in res.details
+
+
+def test_check_token_usage_source_custom_warn() -> None:
+    res = check_token_usage_source(source_checker=lambda: (False, "UNAVAILABLE on this platform", "Upgrade agy"))
+    assert res.status == CheckStatus.WARN
+    assert "UNAVAILABLE" in res.details
+    assert res.what_to_do_next == "Upgrade agy"
+
+
+def test_check_quota_usage_source_default() -> None:
+    res = check_quota_usage_source()
+    assert res.status == CheckStatus.PASS
+    assert "UNAVAILABLE" in res.details
+
+
+def test_check_quota_usage_source_custom_pass() -> None:
+    res = check_quota_usage_source(source_checker=lambda: (True, "mock quota source", None))
+    assert res.status == CheckStatus.PASS
+    assert "mock quota source" in res.details
+
+
+def test_check_quota_usage_source_custom_warn() -> None:
+    res = check_quota_usage_source(source_checker=lambda: (False, "UNAVAILABLE quota stream", "Check quota"))
+    assert res.status == CheckStatus.WARN
+    assert "UNAVAILABLE" in res.details
+
+
+def test_check_telemetry_storage_pass(tmp_path: Path) -> None:
+    db_file = tmp_path / "custom_telemetry.sqlite3"
+    res = check_telemetry_storage(db_path=db_file)
+    assert res.status == CheckStatus.PASS
+    assert str(db_file) in res.details or "ready" in res.details
+
+
+def test_check_telemetry_storage_custom_fail() -> None:
+    res = check_telemetry_storage(storage_checker=lambda: (False, "disk read only", "Remount volume"))
+    assert res.status == CheckStatus.FAIL
+    assert "disk read only" in res.details
+    assert res.what_to_do_next == "Remount volume"
+
+
+def test_check_secret_redaction_pass() -> None:
+    res = check_secret_redaction()
+    assert res.status == CheckStatus.PASS
+    assert "Secret-safe redaction filter active" in res.details
+
+
+def test_check_secret_redaction_fail() -> None:
+    res = check_secret_redaction(redaction_checker=lambda: (False, "token leaked", "Fix regex"))
+    assert res.status == CheckStatus.FAIL
+    assert "token leaked" in res.details
+    assert res.what_to_do_next == "Fix regex"

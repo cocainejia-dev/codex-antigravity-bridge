@@ -662,6 +662,276 @@ def check_windows_conpty(
     )
 
 
+def check_usage_ledger(
+    ledger_factory: Callable[[], tuple[bool, str]] | None = None,
+) -> CheckResult:
+    if ledger_factory:
+        try:
+            ok, desc = ledger_factory()
+            if ok:
+                return CheckResult(
+                    name="Usage Ledger",
+                    status=CheckStatus.PASS,
+                    details=f"Usage telemetry ledger is operational ({desc})",
+                )
+            return CheckResult(
+                name="Usage Ledger",
+                status=CheckStatus.FAIL,
+                details=f"Usage telemetry ledger failed: {desc}",
+                what_to_do_next="Check telemetry module installation and SQLite availability.",
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Usage Ledger",
+                status=CheckStatus.FAIL,
+                details=f"Usage ledger initialization failed: {exc}",
+                what_to_do_next="Ensure codex_agy_bridge.telemetry is importable and functional.",
+            )
+
+    try:
+        from .telemetry import TELEMETRY_SCHEMA_VERSION, UsageLedger
+
+        test_ledger = UsageLedger(in_memory=True, fail_safe=False)
+        ev = test_ledger.record_event(
+            actor="doctor",
+            event_type="health_check",
+            measurement_type="check_count",
+            value=1.0,
+            unit="count",
+        )
+        if ev is None or len(test_ledger.query()) != 1:
+            return CheckResult(
+                name="Usage Ledger",
+                status=CheckStatus.FAIL,
+                details="Usage ledger in-memory test recording failed",
+                what_to_do_next="Verify telemetry.py UsageLedger implementation.",
+            )
+        test_ledger.close()
+        return CheckResult(
+            name="Usage Ledger",
+            status=CheckStatus.PASS,
+            details=f"Usage telemetry ledger is operational (in-memory test passed, schema v{TELEMETRY_SCHEMA_VERSION})",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Usage Ledger",
+            status=CheckStatus.FAIL,
+            details=f"Usage ledger unavailable: {exc}",
+            what_to_do_next="Ensure sqlite3 is available and codex_agy_bridge.telemetry is intact.",
+        )
+
+
+def check_token_usage_source(
+    source_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+) -> CheckResult:
+    if source_checker:
+        try:
+            ok, desc, what_next = source_checker()
+            if ok:
+                return CheckResult(
+                    name="Token Usage Source",
+                    status=CheckStatus.PASS,
+                    details=f"Token usage source active ({desc})",
+                )
+            return CheckResult(
+                name="Token Usage Source",
+                status=CheckStatus.WARN if "UNAVAILABLE" in desc else CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Token Usage Source",
+                status=CheckStatus.WARN,
+                details=f"Token usage check failed: {exc}",
+                what_to_do_next="Check Antigravity CLI version and token telemetry configuration.",
+            )
+
+    return CheckResult(
+        name="Token Usage Source",
+        status=CheckStatus.PASS,
+        details="UNAVAILABLE (provider token telemetry is not exposed by Antigravity CLI; recorded as UNAVAILABLE without synthetic estimates)",
+    )
+
+
+def check_quota_usage_source(
+    source_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+) -> CheckResult:
+    if source_checker:
+        try:
+            ok, desc, what_next = source_checker()
+            if ok:
+                return CheckResult(
+                    name="Quota Usage Source",
+                    status=CheckStatus.PASS,
+                    details=f"Quota usage source active ({desc})",
+                )
+            return CheckResult(
+                name="Quota Usage Source",
+                status=CheckStatus.WARN if "UNAVAILABLE" in desc else CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Quota Usage Source",
+                status=CheckStatus.WARN,
+                details=f"Quota usage check failed: {exc}",
+                what_to_do_next="Check Antigravity CLI quota configuration.",
+            )
+
+    return CheckResult(
+        name="Quota Usage Source",
+        status=CheckStatus.PASS,
+        details="UNAVAILABLE (provider quota stream is not exposed by Antigravity CLI; recorded as UNAVAILABLE without synthetic estimates)",
+    )
+
+
+def check_telemetry_storage(
+    db_path: Path | str | None = None,
+    storage_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> CheckResult:
+    if storage_checker:
+        try:
+            ok, desc, what_next = storage_checker()
+            if ok:
+                return CheckResult(
+                    name="Telemetry Storage",
+                    status=CheckStatus.PASS,
+                    details=f"Telemetry storage ready ({desc})",
+                )
+            return CheckResult(
+                name="Telemetry Storage",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Telemetry Storage",
+                status=CheckStatus.FAIL,
+                details=f"Storage check failed: {exc}",
+                what_to_do_next="Verify telemetry database directory permissions.",
+            )
+
+    try:
+        from .telemetry import get_default_telemetry_db_path
+
+        active_env = env if env is not None else os.environ
+        env_db = active_env.get("CODEX_AGY_TELEMETRY_DB")
+        if db_path is not None:
+            resolved_path = Path(db_path)
+        elif env_db and env_db.strip():
+            resolved_path = Path(env_db.strip())
+        else:
+            resolved_path = get_default_telemetry_db_path()
+
+        parent_dir = resolved_path.parent
+        if not parent_dir.exists():
+            return CheckResult(
+                name="Telemetry Storage",
+                status=CheckStatus.PASS,
+                details=f"Telemetry storage ready (database will be lazily created at {resolved_path})",
+            )
+        if not parent_dir.is_dir() or not os.access(str(parent_dir), os.R_OK | os.W_OK):
+            return CheckResult(
+                name="Telemetry Storage",
+                status=CheckStatus.FAIL,
+                details=f"Telemetry storage directory is not accessible or writable: {parent_dir}",
+                what_to_do_next="Ensure the user has write permissions to the telemetry storage directory.",
+            )
+
+        if resolved_path.is_file():
+            if not os.access(str(resolved_path), os.R_OK):
+                return CheckResult(
+                    name="Telemetry Storage",
+                    status=CheckStatus.FAIL,
+                    details=f"Telemetry database exists but is not readable: {resolved_path}",
+                    what_to_do_next="Check read permissions for the telemetry database file.",
+                )
+            return CheckResult(
+                name="Telemetry Storage",
+                status=CheckStatus.PASS,
+                details=f"Telemetry database active at {resolved_path}",
+            )
+
+        return CheckResult(
+            name="Telemetry Storage",
+            status=CheckStatus.PASS,
+            details=f"Telemetry storage ready (database will be lazily created at {resolved_path})",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Telemetry Storage",
+            status=CheckStatus.FAIL,
+            details=f"Telemetry storage check error: {exc}",
+            what_to_do_next="Check filesystem permissions for telemetry database path.",
+        )
+
+
+def check_secret_redaction(
+    redaction_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+) -> CheckResult:
+    if redaction_checker:
+        try:
+            ok, desc, what_next = redaction_checker()
+            if ok:
+                return CheckResult(
+                    name="Secret Redaction",
+                    status=CheckStatus.PASS,
+                    details=desc,
+                )
+            return CheckResult(
+                name="Secret Redaction",
+                status=CheckStatus.FAIL,
+                details=desc,
+                what_to_do_next=what_next,
+            )
+        except Exception as exc:
+            return CheckResult(
+                name="Secret Redaction",
+                status=CheckStatus.FAIL,
+                details=f"Secret redaction check failed: {exc}",
+                what_to_do_next="Verify telemetry.py redact_metadata implementation.",
+            )
+
+    try:
+        from .telemetry import redact_metadata
+
+        test_payload = {
+            "api_key": "sk-secretkey1234567890123456789012345",
+            "password": "Password123!",
+            "user_prompt": "Confidential prompt text",
+            "safe_value": 42,
+        }
+        redacted = redact_metadata(test_payload)
+        if (
+            redacted.get("api_key") == "[REDACTED]"
+            and redacted.get("password") == "[REDACTED]"
+            and str(redacted.get("user_prompt", "")).startswith("[REDACTED_PROMPT_HASH:")
+            and redacted.get("safe_value") == 42
+        ):
+            return CheckResult(
+                name="Secret Redaction",
+                status=CheckStatus.PASS,
+                details="Secret-safe redaction filter active (API keys, tokens, passwords, and prompts scrubbed/hashed)",
+            )
+        return CheckResult(
+            name="Secret Redaction",
+            status=CheckStatus.FAIL,
+            details="Secret redaction filter did not properly scrub test payload",
+            what_to_do_next="Check redact_metadata pattern rules in telemetry.py.",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Secret Redaction",
+            status=CheckStatus.FAIL,
+            details=f"Secret redaction unavailable: {exc}",
+            what_to_do_next="Ensure codex_agy_bridge.telemetry is intact.",
+        )
+
+
 def run_doctor(
     version_info: tuple[int, int, int] | None = None,
     executable: str | None = None,
@@ -676,6 +946,12 @@ def run_doctor(
     auth_checker: Callable[[], tuple[bool, str]] | None = None,
     dependency_checker: Callable[[], tuple[bool, list[str]]] | None = None,
     home_dir: Path | None = None,
+    ledger_factory: Callable[[], tuple[bool, str]] | None = None,
+    token_source_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    quota_source_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    telemetry_db_path: Path | str | None = None,
+    storage_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
+    redaction_checker: Callable[[], tuple[bool, str, str | None]] | None = None,
 ) -> DoctorReport:
     plat = platform or sys.platform
     v_info = version_info or sys.version_info[:3]
@@ -695,6 +971,11 @@ def run_doctor(
         check_timeout_diagnostics(),
         check_skill_installation(codex_home=codex_home),
         check_windows_conpty(platform=plat, winpty_available=winpty_available),
+        check_usage_ledger(ledger_factory=ledger_factory),
+        check_token_usage_source(source_checker=token_source_checker),
+        check_quota_usage_source(source_checker=quota_source_checker),
+        check_telemetry_storage(db_path=telemetry_db_path, storage_checker=storage_checker, env=env),
+        check_secret_redaction(redaction_checker=redaction_checker),
     ]
 
     has_fail = any(c.status == CheckStatus.FAIL for c in checks)

@@ -16,6 +16,11 @@ def main(argv: list[str] | None = None) -> int | None:
 
         return doctor_main(argv[1:])
 
+    if argv and argv[0] in ("usage", "--usage"):
+        from .usage_cli import main as usage_main
+
+        return usage_main(argv[1:])
+
     mcp.run()
     return 0
 
