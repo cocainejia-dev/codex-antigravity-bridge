@@ -63,6 +63,7 @@ Classify the raw result before reporting it:
 | `permission_blocked` | Permission denial, auto-denial, or permission-caused `no output produced`, including exit code 0. | Preserve scope; request exact authorization before retrying. |
 | `authentication_blocked` | Login, credential, or authentication failure. | Stop and ask for interactive authentication. |
 | `account_switch_required` | Model quota exhaustion or rate limit encountered. | Preserve worktree and code changes; prompt user for interactive `agy` account switch, then call `run_resume`. |
+| `account_switch_required` | Model quota exhaustion or rate limit encountered. | Preserve worktree and code changes; prompt user for interactive `agy` account switch, then call `run_resume`. |
 | `empty_output` | No usable output and no more specific blocker. | Inspect the runner/PTY path; do not infer success. |
 | `invalid_output` | `agy_ask_json` returns unparsable JSON or violates the requested schema. | Treat as failed; issue only a bounded corrective call when justified. |
 | `timed_out` | Hard timeout reached. | Preserve the worktree; narrow scope or request a longer timeout. |
@@ -191,6 +192,18 @@ result. Codex must inspect the branches and run the declared checks before a
 manual merge. The MVP never auto-merges, deletes worktrees, or executes
 arbitrary verification commands. A bridge restart makes the in-memory session
 unavailable; preserve the returned worktrees and inspect them manually.
+
+## Exact-Run Usage Report Final-Response Contract
+
+After a durable run finishes and the Supervisor independently verifies its result,
+query telemetry with the exact durable `run_id` (never `--latest` guessing).
+`run_result(db_path, run_id)` returns `usage_report_status` (`READY` or `FAILED`),
+an absolute `usage_report_path`, a `usage_report_uri`, and a secret-redacted
+`usage_report_reason`. For `READY`, append a concise Chinese Markdown link to the
+exact `<run_id>.html` report plus the absolute local path fallback. For `FAILED`,
+report the failure transparently and state that report generation is observational:
+it cannot alter the task result or trigger a rerun. Token/quota values remain
+`UNAVAILABLE`; call share is labeled `DERIVED` (`调用占比`); secrets are redacted.
 
 ## Pressure Scenario Verification
 

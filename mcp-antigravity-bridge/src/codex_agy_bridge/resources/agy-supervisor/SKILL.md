@@ -22,11 +22,15 @@ Use this sequence:
 5. Inspect status, diff, worktree boundaries, output, and tests.
 6. Accept only a verified success; otherwise make at most two evidence-based
    corrective calls, then stop with the exact blocker.
+7. For durable runs, retrieve terminal result evidence via `run_result(db_path, run_id)`
+   using the exact `run_id` (never `--latest` guessing), independently verify task execution,
+   and append the concise Chinese usage report link and absolute local path fallback to the final response.
 
 Every delegation prompt must include task scope, owned files, forbidden files,
 acceptance criteria, verification commands, permission mode, authorization, and
 the requested report fields. The copyable template, risk matrix, result state
-machine, lifecycle checklist, correction protocol, and pressure cases are in
+machine, lifecycle checklist, correction protocol, exact-run usage report contract,
+and pressure cases are in
 [`references/agy-supervisor-protocol.md`](references/agy-supervisor-protocol.md).
 Parallel worktree plans live under `docs/agy-plans/` and start with
 `Status: READY_FOR_AGY`; create and validate the caller-owned AGY worktree,
@@ -40,6 +44,16 @@ after delegation. The bridge does not create worktrees for `agy_start`.
   requested output schema.
 - `agy_start` requires an existing caller-created isolated worktree as `workdir`;
   an empty or non-directory workdir is rejected.
+- **Durable supervisor & recovery tools (`run_*`)**:
+  - `run_start` persists `CREATED` state and `TaskContract` in SQLite and auto-spawns a bounded worker.
+  - `run_status` / `run_observe` / `run_wait` inspect durable state, heartbeat, and process liveness.
+  - `run_result` retrieves terminal results and automatically generates an exact-run Chinese HTML usage report (`<run_id>.html`).
+  - `run_resume` resumes a suspended run on its existing worktree and contract after account switch or credential refresh.
+- **Exact-run usage report final-response contract**:
+  - Query durable telemetry with the exact `run_id`, never `--latest` guessing.
+  - `run_result` returns `usage_report_status`, absolute `usage_report_path`, `usage_report_uri`, and secret-redacted `usage_report_reason`.
+  - For `READY`, append the Chinese report link and absolute local path fallback. For `FAILED`, report isolation: no task-result change and no rerun.
+  - Token/quota metrics remain `UNAVAILABLE`; call share is labeled `DERIVED` (`调用占比`); secrets are redacted.
 - `dangerously_skip_permissions=false` is the default. Enable it only after
   explicit authorization for the exact trusted worktree and task.
 - `agy_status` may report `queued`, `running`, `completed`, `failed`, or
