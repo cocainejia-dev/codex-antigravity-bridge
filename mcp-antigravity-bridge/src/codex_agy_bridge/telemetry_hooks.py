@@ -402,14 +402,14 @@ def record_worker_completion_event(
         if last_error:
             err_kind = classify_agy_error(str(last_error))
             if (
-                err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT")
+                err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT")
                 or "timed out" in str(last_error).lower()
                 or "timeout" in str(last_error).lower()
                 or "heartbeat" in str(last_error).lower()
             ):
                 to_cls = (
                     err_kind
-                    if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT")
+                    if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT")
                     else "LOCAL_SUPERVISION_TIMEOUT"
                 )
                 ev_to = record_timeout_event(
@@ -763,7 +763,7 @@ def record_agy_job_completion_event(
                 events.append(ev_loc)
 
         # 5. Timeout event if timeout classified
-        if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT") or (
+        if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT") or (
             error_text and "timed out" in error_text.lower()
         ):
             ev_to = record_timeout_event(
@@ -906,7 +906,7 @@ def record_oneshot_call_event(
             events.append(ev_tok)
 
         # 5. Timeout event if error_kind is a timeout
-        if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+        if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT"):
             ev_to = record_timeout_event(
                 project_dir=workdir,
                 timeout_class=error_kind,

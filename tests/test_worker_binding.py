@@ -69,6 +69,21 @@ def test_callback_maps_contract_to_existing_runner(monkeypatch):
     assert callable(kwargs["liveness_probe"])
 
 
+@pytest.mark.parametrize("budget", [300, 1200, 3600])
+def test_callback_propagates_explicit_wall_clock_budget(budget):
+    calls = []
+
+    def fake_runner(prompt, workdir, timeout, **kwargs):
+        calls.append(timeout)
+        return AgyResult(text="ok", exit_code=0, used_pty=False)
+
+    contract = _contract(max_runtime=budget)
+    result = build_worker_callback(contract, runner=fake_runner)(_context(contract))
+
+    assert result.success is True
+    assert calls == [float(budget)]
+
+
 def test_callback_forwards_explicit_permission_bypass_only_when_authorized():
     calls = []
 

@@ -21,6 +21,7 @@ from .contracts import (
     RiskClass,
     RunRecord,
     RunState,
+    TASK_WALL_CLOCK_BUDGET,
     TaskContract,
 )
 from .run_control import (
@@ -212,7 +213,7 @@ def agy_ask_json(
 def agy_start(
     prompt: str,
     workdir: str = "",
-    timeout: float = 300.0,
+    timeout: float = float(TASK_WALL_CLOCK_BUDGET),
     dangerously_skip_permissions: bool = False,
     task_key: str | None = None,
 ) -> str:

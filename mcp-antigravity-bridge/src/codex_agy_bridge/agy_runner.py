@@ -14,6 +14,7 @@ Reference implementations:
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import select
@@ -29,10 +30,62 @@ from urllib.parse import urlsplit
 
 from .contracts import TimeoutClassification
 
+TASK_WALL_CLOCK_BUDGET: float = 1800.0
+NORMAL_AGY_PRINT_TIMEOUT: int = 900
+DEFAULT_SUPERVISION_MARGIN_SECONDS: float = 60.0
+MIN_AGY_PRINT_TIMEOUT: int = 1
+
 CONNECT_TIMEOUT = TimeoutClassification.CONNECT_TIMEOUT.value
 REMOTE_EXECUTION_TIMEOUT = TimeoutClassification.REMOTE_EXECUTION_TIMEOUT.value
 LOCAL_SUPERVISION_TIMEOUT = TimeoutClassification.LOCAL_SUPERVISION_TIMEOUT.value
+AGY_PRINT_TIMEOUT = TimeoutClassification.AGY_PRINT_TIMEOUT.value
 DEFAULT_MAX_LIVENESS_EXTENSIONS = 3
+
+
+def derive_agy_print_timeout(
+    wall_clock_budget: float,
+    *,
+    target: int = NORMAL_AGY_PRINT_TIMEOUT,
+    margin_seconds: float = DEFAULT_SUPERVISION_MARGIN_SECONDS,
+) -> int:
+    """Derive a bounded internal AGY print timeout strictly below outer wall-clock budget.
+
+    Normal target is 900 seconds. For smaller budgets, a supervision margin is reserved
+    so that AGY's internal print-mode timeout fires before the outer runner/supervisor deadline.
+    """
+    if (
+        isinstance(wall_clock_budget, bool)
+        or not isinstance(wall_clock_budget, (int, float))
+        or not math.isfinite(wall_clock_budget)
+        or wall_clock_budget <= 0
+    ):
+        return MIN_AGY_PRINT_TIMEOUT
+
+    budget = float(wall_clock_budget)
+    if budget <= margin_seconds:
+        margin = max(0.1, budget * 0.1)
+        ceiling = max(1.0, budget - margin)
+    else:
+        ceiling = budget - margin_seconds
+
+    bounded = min(float(target), ceiling)
+    val = int(math.floor(bounded))
+    if val >= budget and budget > 1:
+        val = int(math.floor(budget - 1))
+    return max(MIN_AGY_PRINT_TIMEOUT, val)
+
+
+def _format_duration_flag(timeout_val: int | float | str) -> str:
+    """Format duration value for Go flag consumption (e.g. '900s')."""
+    if isinstance(timeout_val, str):
+        val_str = timeout_val.strip()
+        if any(val_str.endswith(unit) for unit in ("s", "m", "h", "ms", "us", "ns")):
+            return val_str
+        try:
+            return f"{int(float(val_str))}s"
+        except ValueError:
+            return val_str
+    return f"{int(timeout_val)}s"
 
 
 class LocalSupervisionTimeoutError(TimeoutError):
@@ -90,6 +143,17 @@ _LOCAL_SUPERVISION_TIMEOUT_MARKERS = (
     "agy timed out after",
     "subprocess timeout",
     "pty timeout",
+)
+
+_AGY_PRINT_TIMEOUT_MARKERS = (
+    "timeout waiting for response",
+    "timeout waiting for",
+    "print-mode timeout",
+    "print mode timeout",
+    "printmode timeout",
+    "print_timeout",
+    "print timeout",
+    "agy_print_timeout",
 )
 
 _CONNECT_TIMEOUT_MARKERS = (
@@ -368,6 +432,8 @@ def classify_agy_error(text: str, stderr: str = "") -> str:
     detail = f"{text}\n{stderr}".lower()
     if any(marker in detail for marker in _AUTH_ERROR_MARKERS):
         return "authentication"
+    if any(marker in detail for marker in _AGY_PRINT_TIMEOUT_MARKERS):
+        return AGY_PRINT_TIMEOUT
     if any(marker in detail for marker in _LOCAL_SUPERVISION_TIMEOUT_MARKERS):
         return LOCAL_SUPERVISION_TIMEOUT
     if any(marker in detail for marker in _CONNECT_TIMEOUT_MARKERS):
@@ -403,7 +469,7 @@ def describe_agy_failure(result: AgyResult) -> str:
             "then tell Codex to retry the task once. "
             f"Original error: {detail}"
         )
-    if kind in ("timeout", REMOTE_EXECUTION_TIMEOUT, LOCAL_SUPERVISION_TIMEOUT):
+    if kind in ("timeout", REMOTE_EXECUTION_TIMEOUT, LOCAL_SUPERVISION_TIMEOUT, AGY_PRINT_TIMEOUT):
         return (
             "AGY_TIMEOUT: agy execution timed out. "
             f"Original error: {detail}"
@@ -414,12 +480,13 @@ def describe_agy_failure(result: AgyResult) -> str:
 def run_agy(
     prompt: str,
     workdir: Optional[str] = None,
-    timeout: float = 300.0,
+    timeout: float = TASK_WALL_CLOCK_BUDGET,
     output_format: Optional[str] = None,
     dangerously_skip_permissions: bool = False,
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    print_timeout: Optional[float] = None,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -433,7 +500,11 @@ def run_agy(
             "`irm https://antigravity.google/cli/install.ps1 | iex`) or set AGY_PATH."
         )
 
-    args = [binary, "-p", prompt]
+    if print_timeout is not None:
+        duration_flag = _format_duration_flag(print_timeout)
+    else:
+        duration_flag = f"{derive_agy_print_timeout(timeout)}s"
+    args = [binary, "-p", prompt, "--print-timeout", duration_flag]
     if output_format:
         args += ["--output-format", output_format]
     if dangerously_skip_permissions:
@@ -513,9 +584,10 @@ def run_agy(
 def run_agy_visible(
     prompt: str,
     workdir: Optional[str] = None,
-    timeout: float = 300.0,
+    timeout: float = TASK_WALL_CLOCK_BUDGET,
     output_format: Optional[str] = None,
     dangerously_skip_permissions: bool = False,
+    print_timeout: Optional[float] = None,
 ) -> AgyResult:
     """Run agy in a visible Windows console and wait for its exit code.
 
@@ -532,7 +604,11 @@ def run_agy_visible(
             "agy binary not found. Install it or set AGY_PATH before using terminal mode."
         )
 
-    args = [binary, "-p", prompt]
+    if print_timeout is not None:
+        duration_flag = _format_duration_flag(print_timeout)
+    else:
+        duration_flag = f"{derive_agy_print_timeout(timeout)}s"
+    args = [binary, "-p", prompt, "--print-timeout", duration_flag]
     if output_format:
         args += ["--output-format", output_format]
     if dangerously_skip_permissions:

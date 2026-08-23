@@ -640,7 +640,7 @@ def _evaluate_obs_timeout_diagnostic(
     if not combined:
         return None
     err_kind = classify_agy_error(combined)
-    if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+    if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT"):
         return diagnose_timeout(
             err_kind,
             remote_progress_evidence="UNKNOWN",

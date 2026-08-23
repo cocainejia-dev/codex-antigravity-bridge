@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Ensure package import from mcp-antigravity-bridge/src
 SRC = Path(__file__).resolve().parents[1] / "mcp-antigravity-bridge" / "src"
@@ -10,12 +10,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import pytest
-
 from codex_agy_bridge.contracts import (
-    ALLOWED_TRANSITIONS,
+    MAX_TASK_RUNTIME_SECONDS,
     AutoCommitPolicy,
     InvalidStateTransitionError,
-    MAX_TASK_RUNTIME_SECONDS,
     RiskClass,
     RunRecord,
     RunState,
@@ -229,6 +227,46 @@ def test_task_contract_json_round_trip() -> None:
     assert restored.auto_commit_policy == contract.auto_commit_policy
     assert restored.allowed_paths == contract.allowed_paths
     assert restored.to_dict() == contract.to_dict()
+
+
+def test_task_contract_default_max_runtime_and_explicit_propagation() -> None:
+    workdir = "C:/tmp/repo" if Path("C:/").exists() else "/tmp/repo"
+    # Default is 1800 seconds
+    c_default = TaskContract(
+        task_id="task-default",
+        objective="Default runtime",
+        base_head="head123",
+        workdir=workdir,
+    )
+    assert c_default.max_runtime == 1800
+
+    # from_dict default is 1800 seconds
+    c_from_dict = TaskContract.from_dict({
+        "task_id": "task-dict",
+        "objective": "Dict default",
+        "base_head": "head123",
+        "workdir": workdir,
+    })
+    assert c_from_dict.max_runtime == 1800
+
+    # Explicit values propagate unchanged
+    for explicit_val in (300, 600, 1200, 1800, 3600):
+        c_exp = TaskContract(
+            task_id=f"task-{explicit_val}",
+            objective="Explicit runtime",
+            base_head="head123",
+            workdir=workdir,
+            max_runtime=explicit_val,
+        )
+        assert c_exp.max_runtime == explicit_val
+        c_exp_dict = TaskContract.from_dict({
+            "task_id": f"task-{explicit_val}",
+            "objective": "Explicit runtime",
+            "base_head": "head123",
+            "workdir": workdir,
+            "max_runtime": explicit_val,
+        })
+        assert c_exp_dict.max_runtime == explicit_val
 
 
 def test_run_record_defaults_and_validation() -> None:

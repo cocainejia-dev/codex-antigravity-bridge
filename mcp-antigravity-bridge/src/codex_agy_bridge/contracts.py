@@ -86,6 +86,7 @@ class TimeoutClassification(str, Enum):
     CONNECT_TIMEOUT = "CONNECT_TIMEOUT"
     REMOTE_EXECUTION_TIMEOUT = "REMOTE_EXECUTION_TIMEOUT"
     LOCAL_SUPERVISION_TIMEOUT = "LOCAL_SUPERVISION_TIMEOUT"
+    AGY_PRINT_TIMEOUT = "AGY_PRINT_TIMEOUT"
 
     @classmethod
     def from_value(cls, val: str | TimeoutClassification) -> TimeoutClassification:
@@ -237,6 +238,10 @@ CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
 # Documented deterministic upper bound for task runtime in seconds (24 hours)
 MAX_TASK_RUNTIME_SECONDS: int = 86400
 
+# Default task wall-clock budget in seconds (30 minutes)
+TASK_WALL_CLOCK_BUDGET: int = 1800
+DEFAULT_TASK_WALL_CLOCK_BUDGET: int = 1800
+
 
 def validate_no_credentials(val: Any, field_name: str = "") -> None:
     """Recursively check that val does not contain credential-like secrets."""
@@ -290,7 +295,7 @@ class TaskContract:
     verification_commands: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
     risk_class: RiskClass = RiskClass.CODE_CHANGES
-    max_runtime: int | float = 300
+    max_runtime: int | float = 1800
     max_repair_rounds: int = 2
     auto_commit_policy: AutoCommitPolicy = AutoCommitPolicy.VERIFIED_ONLY
 
@@ -381,7 +386,7 @@ class TaskContract:
             verification_commands=data.get("verification_commands", []),
             dependencies=data.get("dependencies", []),
             risk_class=RiskClass.from_value(data.get("risk_class", RiskClass.CODE_CHANGES)),
-            max_runtime=data.get("max_runtime", 300),
+            max_runtime=data.get("max_runtime", 1800),
             max_repair_rounds=data.get("max_repair_rounds", 2),
             auto_commit_policy=AutoCommitPolicy.from_value(
                 data.get("auto_commit_policy", AutoCommitPolicy.VERIFIED_ONLY)

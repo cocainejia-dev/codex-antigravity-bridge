@@ -251,8 +251,11 @@ def diagnose_timeout(
                     TimeoutClassification.CONNECT_TIMEOUT.value,
                     TimeoutClassification.REMOTE_EXECUTION_TIMEOUT.value,
                     TimeoutClassification.LOCAL_SUPERVISION_TIMEOUT.value,
+                    TimeoutClassification.AGY_PRINT_TIMEOUT.value,
                 ):
                     resolved_timeout = kind
+                elif "PRINT" in raw_str.upper():
+                    resolved_timeout = TimeoutClassification.AGY_PRINT_TIMEOUT.value
                 elif "CONNECT" in raw_str.upper():
                     resolved_timeout = TimeoutClassification.CONNECT_TIMEOUT.value
                 elif "REMOTE" in raw_str.upper():
@@ -301,6 +304,14 @@ def diagnose_timeout(
         guidance = (
             "Remote execution progress was detected. Reconcile worktree and inspect state "
             "before considering any retry."
+        )
+    elif resolved_timeout == TimeoutClassification.AGY_PRINT_TIMEOUT.value:
+        retry_recommended = RetryRecommendation.RECONCILE_FIRST.value
+        reconciliation_required = ReconciliationStatus.YES.value
+        quota_duplicate_risk = QuotaDuplicateRisk.UNKNOWN.value
+        guidance = (
+            "AGY print-mode response timed out. Reconcile worktree and inspect existing partial "
+            "progress before retrying on the same worktree."
         )
     elif resolved_timeout == TimeoutClassification.CONNECT_TIMEOUT.value:
         if norm_remote_evidence == ProgressEvidence.NO.value and norm_worker_alive == LivenessStatus.NO.value:
@@ -399,6 +410,7 @@ def evaluate_timeout_diagnostics(
                     TimeoutClassification.CONNECT_TIMEOUT.value,
                     TimeoutClassification.REMOTE_EXECUTION_TIMEOUT.value,
                     TimeoutClassification.LOCAL_SUPERVISION_TIMEOUT.value,
+                    TimeoutClassification.AGY_PRINT_TIMEOUT.value,
                 ):
                     resolved_timeout = kind
 
@@ -416,6 +428,7 @@ def evaluate_timeout_diagnostics(
                 TimeoutClassification.CONNECT_TIMEOUT.value,
                 TimeoutClassification.REMOTE_EXECUTION_TIMEOUT.value,
                 TimeoutClassification.LOCAL_SUPERVISION_TIMEOUT.value,
+                TimeoutClassification.AGY_PRINT_TIMEOUT.value,
             ):
                 resolved_timeout = kind
 

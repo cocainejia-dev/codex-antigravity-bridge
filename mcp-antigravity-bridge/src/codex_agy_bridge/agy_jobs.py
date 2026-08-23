@@ -17,7 +17,14 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from .agy_runner import AgyResult, classify_agy_error, describe_agy_failure, run_agy, run_agy_visible
+from .agy_runner import (
+    TASK_WALL_CLOCK_BUDGET,
+    AgyResult,
+    classify_agy_error,
+    describe_agy_failure,
+    run_agy,
+    run_agy_visible,
+)
 from .durable_jobs import (
     DEFAULT_TERMINAL_RETENTION_SECONDS,
     DurableJobStore,
@@ -412,7 +419,7 @@ class AgyJobRegistry:
         self,
         prompt: str,
         workdir: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = TASK_WALL_CLOCK_BUDGET,
         output_format: str | None = None,
         dangerously_skip_permissions: bool = False,
         display_mode: str = "headless",
@@ -666,7 +673,7 @@ class AgyJobRegistry:
                     "heartbeat_at": record.heartbeat_at or record.completed_at,
                     "last_worktree_activity_at": record.last_worktree_activity_at,
                 }
-                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT"):
                     status["error_kind"] = err_kind
                     status["timeout_diagnostic"] = diagnose_timeout(
                         err_kind,
@@ -702,7 +709,7 @@ class AgyJobRegistry:
                     error_kind = classify_agy_error(result.text, result.stderr)
                     status["error_kind"] = error_kind
                     status["error"] = describe_agy_failure(result)
-                    if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                    if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT"):
                         status["timeout_diagnostic"] = diagnose_timeout(
                             error_kind,
                             remote_progress_evidence="UNKNOWN",
@@ -807,7 +814,7 @@ class AgyJobRegistry:
                     "heartbeat_at": durable["heartbeat_at"],
                     "last_worktree_activity_at": durable["last_worktree_activity_at"],
                 }
-                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT", "AGY_PRINT_TIMEOUT"):
                     status["error_kind"] = err_kind
                     status["timeout_diagnostic"] = diagnose_timeout(
                         err_kind,

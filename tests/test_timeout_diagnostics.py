@@ -48,3 +48,19 @@ def test_guidance_is_secret_safe():
     rendered = d.to_json()
     assert "super-secret" not in rendered
     assert "cookie=abc" not in rendered
+
+
+def test_agy_print_timeout_reconcile_first():
+    d = diagnose_timeout("AGY_PRINT_TIMEOUT")
+    assert d["timeout_classification"] == "AGY_PRINT_TIMEOUT"
+    assert d["retry_recommended"] == "RECONCILE_FIRST"
+    assert d["reconciliation_required"] == "YES"
+    assert d["quota_duplicate_risk"] == "UNKNOWN"
+    assert "print-mode" in d["guidance"].lower() or "print" in d["guidance"].lower()
+
+
+def test_evaluate_agy_print_timeout_from_error_text():
+    d = evaluate_timeout_diagnostics(error_text="timeout waiting for response")
+    assert d.timeout_classification == "AGY_PRINT_TIMEOUT"
+    assert d.retry_recommended == "RECONCILE_FIRST"
+    assert d.reconciliation_required == "YES"
