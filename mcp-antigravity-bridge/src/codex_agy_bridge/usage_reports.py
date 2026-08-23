@@ -12,7 +12,9 @@ Provides:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 import re
@@ -246,10 +248,283 @@ def write_stable_report(
     return target, target.as_uri(), alias_target, alias_uri
 
 
+@dataclass
+class FinalReportLinkResult:
+    """Result of final-response usage report provenance validation."""
+
+    is_valid: bool
+    markdown_link: str | None
+    report_path: str | None
+    report_uri: str | None
+    fail_closed_reason: str | None
+    run_id: str | None = None
+    origin: str | None = None
+    db_classification: str | None = None
+    event_provenance: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "is_valid": self.is_valid,
+            "markdown_link": self.markdown_link,
+            "report_path": self.report_path,
+            "report_uri": self.report_uri,
+            "fail_closed_reason": self.fail_closed_reason,
+            "run_id": self.run_id,
+            "origin": self.origin,
+            "db_classification": self.db_classification,
+            "event_provenance": self.event_provenance,
+        }
+
+
+def validate_final_response_report_link(
+    run_result_payload: dict[str, Any] | str,
+    supervisor_run_id: str,
+    label: str = "Usage Report",
+) -> FinalReportLinkResult:
+    """Validate and gate final-response report linking based on strict provenance contracts.
+
+    Fail-closed gate requirements:
+    1. Status must be READY
+    2. File must exist on disk
+    3. Exact run_id match between payload, report metadata, and supervisor_run_id
+    4. Origin must be PRODUCTION
+    5. DB classification must be PRODUCTION_LEDGER
+    6. Confirmed PRODUCTION event provenance
+    7. Rejects TEST/CI, pytest temp/pytest-of/isolated_telemetry paths, latest alias, .codex/visualizations, mismatched run.
+
+    Returns FinalReportLinkResult with either a clickable Markdown link and resolved path/URI,
+    or no link (None) and a fail-closed reason.
+    """
+    if isinstance(run_result_payload, str):
+        try:
+            payload = json.loads(run_result_payload)
+        except Exception as exc:
+            return FinalReportLinkResult(
+                is_valid=False,
+                markdown_link=None,
+                report_path=None,
+                report_uri=None,
+                fail_closed_reason=f"Invalid run_result payload: JSON decode error: {exc}",
+            )
+    elif isinstance(run_result_payload, dict):
+        payload = run_result_payload
+    else:
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=f"Invalid run_result payload type: {type(run_result_payload).__name__}",
+        )
+
+    if not supervisor_run_id or not str(supervisor_run_id).strip():
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason="Missing or empty supervisor_run_id",
+        )
+    sup_run_id = str(supervisor_run_id).strip()
+
+    # 1. Status check
+    status = payload.get("usage_report_status")
+    if status != "READY":
+        reason = payload.get("usage_report_reason") or f"usage report status is '{status}' (expected 'READY')"
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=f"Report status not READY: {reason}",
+            run_id=sup_run_id,
+        )
+
+    # 2. Exact run_id check
+    payload_run_id = payload.get("run_id")
+    report_run_id = payload.get("usage_report_run_id")
+
+    if payload_run_id != sup_run_id:
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=(
+                f"Mismatched run_id: payload run_id '{payload_run_id}' does not match supervisor run_id '{sup_run_id}'"
+            ),
+            run_id=sup_run_id,
+        )
+
+    if report_run_id != sup_run_id:
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=(
+                f"Mismatched report run_id: usage_report_run_id '{report_run_id}' does not match supervisor run_id '{sup_run_id}'"
+            ),
+            run_id=sup_run_id,
+        )
+
+    # 3. Origin check
+    origin = payload.get("usage_report_origin")
+    if origin != "PRODUCTION":
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=(
+                f"Rejected non-production usage report origin: '{origin}' (only confirmed PRODUCTION origin accepted)"
+            ),
+            run_id=sup_run_id,
+            origin=origin,
+        )
+
+    # 4. DB Classification check
+    db_class = payload.get("usage_report_db_classification")
+    if db_class != "PRODUCTION_LEDGER":
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=(
+                f"Rejected non-production DB classification: '{db_class}' (only PRODUCTION_LEDGER accepted)"
+            ),
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+        )
+
+    # 5. Confirmed event provenance check
+    event_prov = payload.get("usage_report_event_provenance")
+    if event_prov != "CONFIRMED_PRODUCTION":
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason=(
+                f"Unconfirmed event provenance: '{event_prov}' (requires confirmed PRODUCTION events)"
+            ),
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+            event_provenance=str(event_prov) if event_prov is not None else None,
+        )
+
+    # 6. Path and File existence checks
+    path_str = payload.get("usage_report_path")
+    if not path_str or not str(path_str).strip():
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=None,
+            report_uri=None,
+            fail_closed_reason="Missing usage_report_path in payload",
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+            event_provenance=event_prov,
+        )
+
+    target_path = Path(path_str).resolve()
+    if not target_path.is_file():
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=str(target_path),
+            report_uri=None,
+            fail_closed_reason=f"Usage report file does not exist on disk: {target_path}",
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+            event_provenance=event_prov,
+        )
+
+    # 7. Reject forbidden / alias paths
+    if target_path.name.lower() == "latest.html" or target_path.stem.lower() == "latest":
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=str(target_path),
+            report_uri=None,
+            fail_closed_reason=f"Rejected latest alias path: {target_path} (must be exact run report)",
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+            event_provenance=event_prov,
+        )
+
+    norm_path_lower = str(target_path).lower().replace("\\", "/")
+    forbidden_patterns = [
+        "pytest",
+        "pytest-of",
+        "isolated_telemetry",
+        "test_isolated",
+        ".codex/visualizations",
+        "visualizations/",
+    ]
+    for pat in forbidden_patterns:
+        if pat in norm_path_lower:
+            return FinalReportLinkResult(
+                is_valid=False,
+                markdown_link=None,
+                report_path=str(target_path),
+                report_uri=None,
+                fail_closed_reason=f"Rejected forbidden report path containing '{pat}': {target_path}",
+                run_id=sup_run_id,
+                origin=origin,
+                db_classification=db_class,
+                event_provenance=event_prov,
+            )
+
+    expected_name = f"{sanitize_filename_component(sup_run_id)}.html".lower()
+    if target_path.name.lower() != expected_name:
+        return FinalReportLinkResult(
+            is_valid=False,
+            markdown_link=None,
+            report_path=str(target_path),
+            report_uri=None,
+            fail_closed_reason=(
+                f"Report filename is not bound to exact run_id '{sup_run_id}': {target_path.name}"
+            ),
+            run_id=sup_run_id,
+            origin=origin,
+            db_classification=db_class,
+            event_provenance=event_prov,
+        )
+
+    # 8. All checks passed -> compute URI and Markdown link
+    resolved_uri = target_path.as_uri()
+    markdown_link = f"[{label}]({resolved_uri})"
+
+    return FinalReportLinkResult(
+        is_valid=True,
+        markdown_link=markdown_link,
+        report_path=str(target_path),
+        report_uri=resolved_uri,
+        fail_closed_reason=None,
+        run_id=sup_run_id,
+        origin=origin,
+        db_classification=db_class,
+        event_provenance=event_prov,
+    )
+
+
+resolve_final_response_report_link = validate_final_response_report_link
+
+
 __all__ = [
     "get_default_reports_dir",
     "sanitize_filename_component",
     "find_latest_run",
     "resolve_report_path",
     "write_stable_report",
+    "FinalReportLinkResult",
+    "validate_final_response_report_link",
+    "resolve_final_response_report_link",
 ]

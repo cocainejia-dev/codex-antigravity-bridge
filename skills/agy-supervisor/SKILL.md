@@ -55,7 +55,9 @@ after delegation. The bridge does not create worktrees for `agy_start`.
 - **Exact-run usage report final-response contract**:
   - Supervisor must query `run_result` or usage report APIs using the exact durable `run_id` (never rely on `--latest` guessing).
   - `run_result` returns `usage_report_status` (`READY` or `FAILED`), `usage_report_path` (absolute local path), `usage_report_uri` (`file:///...`), and `usage_report_reason`.
-  - When `usage_report_status == "READY"`, append a concise Chinese report link to the exact `<run_id>.html` file and provide the absolute local path fallback.
+  - `run_result` also returns `usage_report_origin`, `usage_report_run_id`, `usage_report_db_classification`, and `usage_report_event_provenance`; the final response must pass `validate_final_response_report_link` before emitting any link.
+  - Emit a link only when status is READY, the exact path exists, run IDs match, origin is PRODUCTION, DB classification is PRODUCTION_LEDGER, and event provenance is CONFIRMED_PRODUCTION. Never use latest, pytest/CI, or visualization artifacts.
+  - When the gate rejects a report, state that the production report is unavailable; do not substitute another report or rerun the worker.
   - When `usage_report_status == "FAILED"`, report generation failure is isolated: it must never alter the verified task result or trigger a worker rerun.
   - Token/quota metrics remain `UNAVAILABLE`; call share is observational and labeled `DERIVED` (`调用占比`); secrets are redacted.
 - `dangerously_skip_permissions=false` is the default. Enable it only after

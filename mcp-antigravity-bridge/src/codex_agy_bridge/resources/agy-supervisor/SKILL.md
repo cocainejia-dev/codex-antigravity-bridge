@@ -52,7 +52,9 @@ after delegation. The bridge does not create worktrees for `agy_start`.
 - **Exact-run usage report final-response contract**:
   - Query durable telemetry with the exact `run_id`, never `--latest` guessing.
   - `run_result` returns `usage_report_status`, absolute `usage_report_path`, `usage_report_uri`, and secret-redacted `usage_report_reason`.
-  - For `READY`, append the Chinese report link and absolute local path fallback. For `FAILED`, report isolation: no task-result change and no rerun.
+  - `run_result` also returns `usage_report_origin`, `usage_report_run_id`, `usage_report_db_classification`, and `usage_report_event_provenance`; call `validate_final_response_report_link` before emitting any link.
+  - Emit a link only for an existing exact run report with PRODUCTION origin, PRODUCTION_LEDGER classification, and CONFIRMED_PRODUCTION events. Reject TEST/CI, pytest, latest, and visualization artifacts; never substitute a report or rerun a worker.
+  - For `FAILED` or rejected provenance, report isolation: no task-result change and no rerun.
   - Token/quota metrics remain `UNAVAILABLE`; call share is labeled `DERIVED` (`调用占比`); secrets are redacted.
 - `dangerously_skip_permissions=false` is the default. Enable it only after
   explicit authorization for the exact trusted worktree and task.

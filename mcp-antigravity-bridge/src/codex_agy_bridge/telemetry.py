@@ -162,6 +162,30 @@ class EventOrigin(str, Enum):
         return cls.UNKNOWN
 
 
+class TelemetryDbClassification(str, Enum):
+    """Classification of usage telemetry database ledger."""
+
+    PRODUCTION_LEDGER = "PRODUCTION_LEDGER"
+    TEST_LEDGER = "TEST_LEDGER"
+    CI_LEDGER = "CI_LEDGER"
+    UNKNOWN_LEDGER = "UNKNOWN_LEDGER"
+
+    @classmethod
+    def from_value(cls, val: str | TelemetryDbClassification | None) -> TelemetryDbClassification:
+        """Parse DB classification with case and character normalization."""
+        if val is None:
+            return cls.UNKNOWN_LEDGER
+        if isinstance(val, cls):
+            return val
+        if not isinstance(val, str):
+            return cls.UNKNOWN_LEDGER
+        norm = val.strip().upper().replace("-", "_").replace(" ", "_")
+        for member in cls:
+            if member.value == norm or member.name == norm:
+                return member
+        return cls.UNKNOWN_LEDGER
+
+
 def resolve_default_origin(origin: str | EventOrigin | None = None) -> EventOrigin:
     """Resolve telemetry origin taking into account explicit parameters and environment context."""
     if origin is not None:
@@ -178,6 +202,153 @@ def resolve_default_origin(origin: str | EventOrigin | None = None) -> EventOrig
     ):
         return EventOrigin.CI
     return EventOrigin.PRODUCTION
+
+
+def classify_telemetry_db(
+    db_path: str | Path | None,
+    origin: str | EventOrigin | None = None,
+) -> str:
+    """Classify a telemetry SQLite database path into PRODUCTION_LEDGER, TEST_LEDGER, CI_LEDGER, or UNKNOWN_LEDGER."""
+    import tempfile
+
+    resolved_origin = resolve_default_origin(origin)
+
+    if db_path is None or str(db_path).strip() in ("", ":memory:"):
+        if resolved_origin == EventOrigin.TEST:
+            return TelemetryDbClassification.TEST_LEDGER.value
+        if resolved_origin == EventOrigin.CI:
+            return TelemetryDbClassification.CI_LEDGER.value
+        return TelemetryDbClassification.UNKNOWN_LEDGER.value
+
+    p_str = str(db_path).strip().lower().replace("\\", "/")
+
+    # Check for test-isolated paths
+    test_indicators = [
+        "pytest",
+        "pytest-of",
+        "isolated_telemetry",
+        "test_isolated",
+        "test_telemetry",
+        "test_runs",
+        "test_ledger",
+    ]
+    if any(ind in p_str for ind in test_indicators):
+        return TelemetryDbClassification.TEST_LEDGER.value
+
+    # Check for test environment markers
+    if resolved_origin == EventOrigin.TEST:
+        return TelemetryDbClassification.TEST_LEDGER.value
+
+    # Check for CI indicators
+    if resolved_origin == EventOrigin.CI or "ci_telemetry" in p_str or "ci_ledger" in p_str:
+        return TelemetryDbClassification.CI_LEDGER.value
+
+    # Check if this resolves to standard default telemetry path
+    try:
+        def_prod_path = get_default_telemetry_db_path().resolve()
+        target_res = Path(db_path).expanduser().resolve()
+        if target_res == def_prod_path and resolved_origin == EventOrigin.PRODUCTION:
+            return TelemetryDbClassification.PRODUCTION_LEDGER.value
+    except Exception:
+        pass
+
+    # If explicit non-test path and origin is PRODUCTION
+    if resolved_origin == EventOrigin.PRODUCTION:
+        try:
+            target_res = Path(db_path).expanduser().resolve()
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            if temp_dir in target_res.parents or str(temp_dir).lower().replace("\\", "/") in str(target_res).lower().replace("\\", "/"):
+                return TelemetryDbClassification.TEST_LEDGER.value
+        except Exception:
+            pass
+        return TelemetryDbClassification.PRODUCTION_LEDGER.value
+
+    return TelemetryDbClassification.UNKNOWN_LEDGER.value
+
+
+def evaluate_event_provenance(
+    events: Sequence[UsageEvent | dict[str, Any]],
+    expected_run_id: str | None = None,
+    expected_origin: str | EventOrigin | None = None,
+) -> dict[str, Any]:
+    """Evaluate and confirm event provenance for a collection of usage events."""
+    if not events:
+        return {
+            "confirmed": False,
+            "classification": "NO_EVENTS",
+            "event_count": 0,
+            "origins": [],
+            "primary_origin": resolve_default_origin(expected_origin).value,
+            "has_production_events": False,
+            "has_test_events": False,
+            "has_ci_events": False,
+            "has_unknown_events": False,
+            "is_pure_production": False,
+            "exact_run_matched": False,
+        }
+
+    origin_set: set[str] = set()
+    run_ids: set[str] = set()
+    for ev in events:
+        if isinstance(ev, UsageEvent):
+            orig = ev.origin.value if isinstance(ev.origin, EventOrigin) else str(ev.origin or "UNKNOWN")
+            r_id = ev.run_id
+        elif isinstance(ev, dict):
+            orig = str(ev.get("origin") or "UNKNOWN")
+            r_id = ev.get("run_id")
+        else:
+            orig = "UNKNOWN"
+            r_id = None
+        origin_set.add(orig.upper())
+        if r_id:
+            run_ids.add(r_id)
+
+    has_prod = "PRODUCTION" in origin_set
+    has_test = "TEST" in origin_set
+    has_ci = "CI" in origin_set
+    has_unk = ("UNKNOWN" in origin_set) or (None in origin_set) or ("" in origin_set)
+
+    is_pure_prod = has_prod and not (has_test or has_ci or has_unk)
+
+    if is_pure_prod:
+        primary_orig = "PRODUCTION"
+    elif has_test:
+        primary_orig = "TEST"
+    elif has_ci:
+        primary_orig = "CI"
+    else:
+        primary_orig = "UNKNOWN"
+
+    exact_run_matched = True
+    if expected_run_id is not None:
+        exact_run_matched = (len(run_ids) == 1 and expected_run_id in run_ids)
+
+    confirmed_prod = is_pure_prod and exact_run_matched and len(events) > 0
+
+    if confirmed_prod:
+        classification = "CONFIRMED_PRODUCTION"
+    elif has_test:
+        classification = "TEST_PROVENANCE"
+    elif has_ci:
+        classification = "CI_PROVENANCE"
+    elif has_unk:
+        classification = "UNKNOWN_PROVENANCE"
+    else:
+        classification = "UNCONFIRMED_PROVENANCE"
+
+    return {
+        "confirmed": confirmed_prod,
+        "classification": classification,
+        "event_count": len(events),
+        "origins": sorted(origin_set),
+        "primary_origin": primary_orig,
+        "has_production_events": has_prod,
+        "has_test_events": has_test,
+        "has_ci_events": has_ci,
+        "has_unknown_events": has_unk,
+        "is_pure_production": is_pure_prod,
+        "exact_run_matched": exact_run_matched,
+    }
 
 
 DEFAULT_SOURCE_CONFIDENCE: dict[MeasurementSource, float] = {
@@ -998,6 +1169,11 @@ class UsageLedger:
                 conn = self._get_connection()
                 conn.execute("DELETE FROM telemetry_events;")
 
+    @property
+    def db_classification(self) -> str:
+        """Classify this ledger's database path."""
+        return classify_telemetry_db(self.db_path)
+
     def close(self) -> None:
         """Close database connection."""
         with self._lock:
@@ -1013,7 +1189,10 @@ class UsageLedger:
 __all__ = [
     "MeasurementSource",
     "EventOrigin",
+    "TelemetryDbClassification",
     "resolve_default_origin",
+    "classify_telemetry_db",
+    "evaluate_event_provenance",
     "UsageEvent",
     "UsageSummary",
     "UsageLedger",

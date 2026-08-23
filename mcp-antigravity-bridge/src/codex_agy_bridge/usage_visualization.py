@@ -65,6 +65,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     until = filters.get("until")
     db_path = filters.get("db_path", ":memory:")
     is_latest = filters.get("latest", False)
+    report_origin = report_data.get("usage_report_origin") or filters.get("usage_report_origin") or "UNKNOWN"
+    report_run_id = report_data.get("usage_report_run_id") or filters.get("usage_report_run_id") or run_id
+    report_db_class = report_data.get("usage_report_db_classification") or filters.get("usage_report_db_classification") or "UNKNOWN_LEDGER"
+    report_event_provenance = report_data.get("usage_report_event_provenance") or filters.get("usage_report_event_provenance") or "UNKNOWN_PROVENANCE"
 
     event_count = summary.get("event_count", 0)
     unavail_count = summary.get("unavailable_count", 0)
@@ -369,6 +373,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
       <div class="filter-item"><span class="filter-label">任务 ID:</span><span class="filter-value">{_esc(task_id or '全部')}</span></div>
       <div class="filter-item"><span class="filter-label">项目目录:</span><span class="filter-value">{_esc(project_dir or '全部')}</span></div>
       <div class="filter-item"><span class="filter-label">数据库:</span><span class="filter-value">{_esc(db_path)}</span></div>
+      <div class="filter-item"><span class="filter-label">报告来源:</span><span class="filter-value">{_esc(report_origin)}</span></div>
+      <div class="filter-item"><span class="filter-label">报告运行:</span><span class="filter-value">{_esc(report_run_id or '未绑定')}</span></div>
+      <div class="filter-item"><span class="filter-label">数据库分类:</span><span class="filter-value">{_esc(report_db_class)}</span></div>
+      <div class="filter-item"><span class="filter-label">事件溯源:</span><span class="filter-value">{_esc(report_event_provenance)}</span></div>
       <div class="filter-item"><span class="filter-label">事件总数:</span><span class="filter-value">{event_count} (不可用数据点: {unavail_count})</span></div>
     </div>
   </header>

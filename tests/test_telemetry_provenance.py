@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import sqlite3
 import sys
 import tempfile
-from typing import Any
+from contextlib import suppress
+from pathlib import Path
+
+import pytest
 
 # Ensure package import from mcp-antigravity-bridge/src
 SRC = Path(__file__).resolve().parents[1] / "mcp-antigravity-bridge" / "src"
@@ -24,18 +25,13 @@ try:
 except ImportError:
     pass
 
-import pytest
-
 from codex_agy_bridge.telemetry import (
-    DEFAULT_SOURCE_CONFIDENCE,
     EventOrigin,
-    MeasurementSource,
     UsageEvent,
     UsageLedger,
-    UsageSummary,
-    aggregate_events,
-    compute_event_id,
+    classify_telemetry_db,
     deterministic_json_dumps,
+    evaluate_event_provenance,
     get_default_telemetry_db_path,
     resolve_default_origin,
 )
@@ -55,7 +51,10 @@ from codex_agy_bridge.telemetry_hooks import (
     record_worker_completion_event,
     record_worker_launch_event,
     reset_telemetry_ledgers,
-    telemetry_path_for,
+)
+from codex_agy_bridge.usage_cli import build_usage_report_data
+from codex_agy_bridge.usage_reports import (
+    validate_final_response_report_link,
 )
 
 
@@ -578,3 +577,452 @@ def test_existing_telemetry_compatibility():
             if ledger is not None:
                 ledger.close()
             reset_telemetry_ledgers()
+
+
+def test_classify_telemetry_db_matrix():
+    """Verify DB classification across in-memory, test, CI, and production ledger paths."""
+    # 1. In-memory / empty paths
+    assert classify_telemetry_db(None, origin=EventOrigin.TEST) == "TEST_LEDGER"
+    assert classify_telemetry_db(":memory:", origin=EventOrigin.TEST) == "TEST_LEDGER"
+    assert classify_telemetry_db(":memory:", origin=EventOrigin.CI) == "CI_LEDGER"
+    assert classify_telemetry_db(":memory:", origin=EventOrigin.PRODUCTION) == "UNKNOWN_LEDGER"
+
+    # 2. Test indicators in path
+    assert classify_telemetry_db("d:/tmp/pytest-123/telemetry.db", origin=EventOrigin.PRODUCTION) == "TEST_LEDGER"
+    assert classify_telemetry_db("c:/data/isolated_telemetry/run.db", origin=EventOrigin.PRODUCTION) == "TEST_LEDGER"
+    assert classify_telemetry_db("test_isolated_telemetry.sqlite3", origin=EventOrigin.PRODUCTION) == "TEST_LEDGER"
+
+    # 3. CI indicators in path or origin
+    assert classify_telemetry_db("d:/repos/ci_telemetry.sqlite3", origin=EventOrigin.PRODUCTION) == "CI_LEDGER"
+    assert classify_telemetry_db("d:/repos/app.sqlite3", origin=EventOrigin.CI) == "CI_LEDGER"
+
+    # 4. Standard default production path
+    prod_path = get_default_telemetry_db_path()
+    assert classify_telemetry_db(prod_path, origin=EventOrigin.PRODUCTION) == "PRODUCTION_LEDGER"
+
+
+def test_evaluate_event_provenance_matrix():
+    """Verify provenance evaluation across pure production, mixed origins, and empty event sets."""
+    # 1. Empty events -> NO_EVENTS
+    eval_empty = evaluate_event_provenance([], expected_run_id="run-1", expected_origin=EventOrigin.PRODUCTION)
+    assert eval_empty["confirmed"] is False
+    assert eval_empty["classification"] == "NO_EVENTS"
+    assert eval_empty["is_pure_production"] is False
+
+    # 2. Pure production events matching expected run_id -> CONFIRMED_PRODUCTION
+    ev1 = UsageEvent(
+        actor="codex", event_type="call", measurement_type="tokens", value=100.0,
+        unit="tokens", run_id="run-prod-1", origin=EventOrigin.PRODUCTION
+    )
+    ev2 = UsageEvent(
+        actor="agy", event_type="completion", measurement_type="seconds", value=5.0,
+        unit="seconds", run_id="run-prod-1", origin=EventOrigin.PRODUCTION
+    )
+    eval_prod = evaluate_event_provenance([ev1, ev2], expected_run_id="run-prod-1")
+    assert eval_prod["confirmed"] is True
+    assert eval_prod["classification"] == "CONFIRMED_PRODUCTION"
+    assert eval_prod["is_pure_production"] is True
+    assert eval_prod["exact_run_matched"] is True
+
+    # 3. Pure production events with mismatched expected run_id
+    eval_mismatch = evaluate_event_provenance([ev1, ev2], expected_run_id="other-run")
+    assert eval_mismatch["confirmed"] is False
+    assert eval_mismatch["exact_run_matched"] is False
+
+    # 4. Mixed production and test events -> TEST_PROVENANCE
+    ev_test = UsageEvent(
+        actor="bridge", event_type="retry", measurement_type="retries", value=1.0,
+        unit="count", run_id="run-prod-1", origin=EventOrigin.TEST
+    )
+    eval_mixed = evaluate_event_provenance([ev1, ev_test], expected_run_id="run-prod-1")
+    assert eval_mixed["confirmed"] is False
+    assert eval_mixed["classification"] == "TEST_PROVENANCE"
+    assert eval_mixed["has_test_events"] is True
+
+    # 5. CI events -> CI_PROVENANCE
+    ev_ci = UsageEvent(
+        actor="codex", event_type="call", measurement_type="tokens", value=50.0,
+        unit="tokens", run_id="run-ci-1", origin=EventOrigin.CI
+    )
+    eval_ci = evaluate_event_provenance([ev_ci], expected_run_id="run-ci-1")
+    assert eval_ci["confirmed"] is False
+    assert eval_ci["classification"] == "CI_PROVENANCE"
+    assert eval_ci["has_ci_events"] is True
+
+    # 6. UNKNOWN origin events -> UNKNOWN_PROVENANCE
+    ev_unk = UsageEvent(
+        actor="codex", event_type="call", measurement_type="tokens", value=50.0,
+        unit="tokens", run_id="run-unk-1", origin=EventOrigin.UNKNOWN
+    )
+    eval_unk = evaluate_event_provenance([ev_unk], expected_run_id="run-unk-1")
+    assert eval_unk["confirmed"] is False
+    assert eval_unk["classification"] == "UNKNOWN_PROVENANCE"
+
+
+def test_build_usage_report_data_provenance_metadata():
+    """Verify build_usage_report_data populates usage_report_* provenance metadata fields."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        ledger = None
+        try:
+            db_path = Path(tmp_dir) / "build_report.sqlite3"
+            ledger = UsageLedger(db_path=db_path)
+
+            ledger.record_event(
+                actor="codex",
+                event_type="call",
+                measurement_type="tokens",
+                value=150.0,
+                unit="tokens",
+                run_id="run-exact-001",
+                origin=EventOrigin.PRODUCTION,
+            )
+
+            report_data = build_usage_report_data(
+                ledger=ledger,
+                run_id="run-exact-001",
+                origin=EventOrigin.PRODUCTION,
+            )
+
+            assert report_data["usage_report_origin"] == "PRODUCTION"
+            assert report_data["usage_report_run_id"] == "run-exact-001"
+            assert "usage_report_db_classification" in report_data
+            assert report_data["usage_report_event_provenance"] == "CONFIRMED_PRODUCTION"
+            assert report_data["event_provenance_details"]["confirmed"] is True
+
+            filters = report_data["filters"]
+            assert filters["usage_report_origin"] == "PRODUCTION"
+            assert filters["usage_report_run_id"] == "run-exact-001"
+            assert filters["usage_report_event_provenance"] == "CONFIRMED_PRODUCTION"
+        finally:
+            if ledger is not None:
+                ledger.close()
+            reset_telemetry_ledgers()
+
+
+def test_validate_final_response_report_link_rejects_test_and_ci(tmp_path: Path):
+    """Verify fail-closed gating rejects TEST, CI, and test-isolated report origins."""
+    report_file = tmp_path / "run-test-001.html"
+    report_file.write_text("<html><body>Test Report</body></html>", encoding="utf-8")
+
+    # 1. Reject TEST origin
+    payload_test = {
+        "run_id": "run-test-001",
+        "usage_report_run_id": "run-test-001",
+        "usage_report_status": "READY",
+        "usage_report_origin": "TEST",
+        "usage_report_db_classification": "TEST_LEDGER",
+        "usage_report_event_provenance": "TEST_PROVENANCE",
+        "usage_report_path": str(report_file),
+        "usage_report_uri": report_file.resolve().as_uri(),
+        "usage_report_reason": None,
+    }
+    res_test = validate_final_response_report_link(payload_test, supervisor_run_id="run-test-001")
+    assert res_test.is_valid is False
+    assert res_test.markdown_link is None
+    assert "Rejected non-production usage report origin: 'TEST'" in (res_test.fail_closed_reason or "")
+
+    # 2. Reject CI origin
+    payload_ci = {
+        "run_id": "run-ci-001",
+        "usage_report_run_id": "run-ci-001",
+        "usage_report_status": "READY",
+        "usage_report_origin": "CI",
+        "usage_report_db_classification": "CI_LEDGER",
+        "usage_report_event_provenance": "CI_PROVENANCE",
+        "usage_report_path": str(report_file),
+        "usage_report_uri": report_file.resolve().as_uri(),
+        "usage_report_reason": None,
+    }
+    res_ci = validate_final_response_report_link(payload_ci, supervisor_run_id="run-ci-001")
+    assert res_ci.is_valid is False
+    assert res_ci.markdown_link is None
+    assert "Rejected non-production usage report origin: 'CI'" in (res_ci.fail_closed_reason or "")
+
+    # 3. Reject non-production DB classification
+    payload_bad_db = dict(payload_test)
+    payload_bad_db["usage_report_origin"] = "PRODUCTION"
+    payload_bad_db["usage_report_db_classification"] = "TEST_LEDGER"
+    res_bad_db = validate_final_response_report_link(payload_bad_db, supervisor_run_id="run-test-001")
+    assert res_bad_db.is_valid is False
+    assert "Rejected non-production DB classification: 'TEST_LEDGER'" in (res_bad_db.fail_closed_reason or "")
+
+    # 4. Reject unconfirmed event provenance
+    payload_bad_prov = dict(payload_test)
+    payload_bad_prov["usage_report_origin"] = "PRODUCTION"
+    payload_bad_prov["usage_report_db_classification"] = "PRODUCTION_LEDGER"
+    payload_bad_prov["usage_report_event_provenance"] = "TEST_PROVENANCE"
+    res_bad_prov = validate_final_response_report_link(payload_bad_prov, supervisor_run_id="run-test-001")
+    assert res_bad_prov.is_valid is False
+    assert "Unconfirmed event provenance: 'TEST_PROVENANCE'" in (res_bad_prov.fail_closed_reason or "")
+
+    # 5. Reject forbidden report paths containing test indicators
+    forbidden_file = tmp_path / "isolated_telemetry_report.html"
+    forbidden_file.write_text("<html></html>", encoding="utf-8")
+    payload_forbidden_path = {
+        "run_id": "run-prod-001",
+        "usage_report_run_id": "run-prod-001",
+        "usage_report_status": "READY",
+        "usage_report_origin": "PRODUCTION",
+        "usage_report_db_classification": "PRODUCTION_LEDGER",
+        "usage_report_event_provenance": "CONFIRMED_PRODUCTION",
+        "usage_report_path": str(forbidden_file),
+        "usage_report_uri": forbidden_file.resolve().as_uri(),
+        "usage_report_reason": None,
+    }
+    res_forbidden = validate_final_response_report_link(payload_forbidden_path, supervisor_run_id="run-prod-001")
+    assert res_forbidden.is_valid is False
+    assert "Rejected forbidden report path" in (res_forbidden.fail_closed_reason or "")
+
+
+def test_validate_final_response_report_link_accepts_exact_production():
+    """Verify exact production run report produces valid URI and clickable Markdown link."""
+    # Create valid report file path in non-test mock reports directory
+    mock_dir = Path(tempfile.gettempdir()) / f"codex_agy_mock_prod_{os.getpid()}"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    report_file = mock_dir / "run_prod_999.html"
+    try:
+        report_file.write_text("<!DOCTYPE html><html><body>Production Report</body></html>", encoding="utf-8")
+        expected_uri = report_file.resolve().as_uri()
+
+        payload = {
+            "run_id": "run_prod_999",
+            "usage_report_run_id": "run_prod_999",
+            "usage_report_status": "READY",
+            "usage_report_origin": "PRODUCTION",
+            "usage_report_db_classification": "PRODUCTION_LEDGER",
+            "usage_report_event_provenance": "CONFIRMED_PRODUCTION",
+            "usage_report_path": str(report_file),
+            "usage_report_uri": expected_uri,
+            "usage_report_reason": None,
+        }
+
+        # Pass as dict
+        res = validate_final_response_report_link(payload, supervisor_run_id="run_prod_999", label="Usage Report")
+        assert res.is_valid is True
+        assert res.report_path == str(report_file.resolve())
+        assert res.report_uri == expected_uri
+        assert res.markdown_link == f"[Usage Report]({expected_uri})"
+        assert res.fail_closed_reason is None
+        assert res.run_id == "run_prod_999"
+        assert res.origin == "PRODUCTION"
+        assert res.db_classification == "PRODUCTION_LEDGER"
+        assert res.event_provenance == "CONFIRMED_PRODUCTION"
+
+        # Pass as JSON string (MCP protocol output)
+        json_str = deterministic_json_dumps(payload)
+        res_from_json = validate_final_response_report_link(json_str, supervisor_run_id="run_prod_999")
+        assert res_from_json.is_valid is True
+        assert res_from_json.report_uri == expected_uri
+        assert res_from_json.markdown_link == f"[Usage Report]({expected_uri})"
+
+        # Verify URI matches Path.as_uri()
+        assert res.report_uri == Path(res.report_path).resolve().as_uri()
+        assert res.report_uri.startswith("file:///")
+    finally:
+        if report_file.exists():
+            with suppress(OSError):
+                report_file.unlink()
+        if mock_dir.exists():
+            with suppress(OSError):
+                mock_dir.rmdir()
+
+
+def test_validate_final_response_report_link_rejects_mismatched_run():
+    """Verify mismatched run_id or report_run_id fails closed immediately."""
+    mock_dir = Path(tempfile.gettempdir()) / f"codex_agy_mock_prod_{os.getpid()}"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    report_file = mock_dir / "run_001.html"
+    try:
+        report_file.write_text("<html></html>", encoding="utf-8")
+
+        # Mismatch between payload run_id and supervisor_run_id
+        payload1 = {
+            "run_id": "run-A",
+            "usage_report_run_id": "run-A",
+            "usage_report_status": "READY",
+            "usage_report_origin": "PRODUCTION",
+            "usage_report_db_classification": "PRODUCTION_LEDGER",
+            "usage_report_event_provenance": "CONFIRMED_PRODUCTION",
+            "usage_report_path": str(report_file),
+        }
+        res1 = validate_final_response_report_link(payload1, supervisor_run_id="run-B")
+        assert res1.is_valid is False
+        assert "Mismatched run_id" in (res1.fail_closed_reason or "")
+
+        # Mismatch between payload usage_report_run_id and supervisor_run_id
+        payload2 = {
+            "run_id": "run-B",
+            "usage_report_run_id": "run-A",
+            "usage_report_status": "READY",
+            "usage_report_origin": "PRODUCTION",
+            "usage_report_db_classification": "PRODUCTION_LEDGER",
+            "usage_report_event_provenance": "CONFIRMED_PRODUCTION",
+            "usage_report_path": str(report_file),
+        }
+        res2 = validate_final_response_report_link(payload2, supervisor_run_id="run-B")
+        assert res2.is_valid is False
+        assert "Mismatched report run_id" in (res2.fail_closed_reason or "")
+    finally:
+        if report_file.exists():
+            with suppress(OSError):
+                report_file.unlink()
+        if mock_dir.exists():
+            with suppress(OSError):
+                mock_dir.rmdir()
+
+
+def test_validate_final_response_report_link_rejects_missing_file_and_latest_alias():
+    """Verify non-existent files and latest alias files are rejected."""
+    mock_dir = Path(tempfile.gettempdir()) / f"codex_agy_mock_prod_{os.getpid()}"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        # 1. Missing file on disk
+        missing_file = mock_dir / "does_not_exist.html"
+        payload_missing = {
+            "run_id": "run-100",
+            "usage_report_run_id": "run-100",
+            "usage_report_status": "READY",
+            "usage_report_origin": "PRODUCTION",
+            "usage_report_db_classification": "PRODUCTION_LEDGER",
+            "usage_report_event_provenance": "CONFIRMED_PRODUCTION",
+            "usage_report_path": str(missing_file),
+        }
+        res_missing = validate_final_response_report_link(payload_missing, supervisor_run_id="run-100")
+        assert res_missing.is_valid is False
+        assert "Usage report file does not exist on disk" in (res_missing.fail_closed_reason or "")
+
+        # 2. Empty usage_report_path
+        payload_empty_path = dict(payload_missing)
+        payload_empty_path["usage_report_path"] = ""
+        res_empty = validate_final_response_report_link(payload_empty_path, supervisor_run_id="run-100")
+        assert res_empty.is_valid is False
+        assert "Missing usage_report_path in payload" in (res_empty.fail_closed_reason or "")
+
+        # 3. Latest alias path
+        latest_file = mock_dir / "latest.html"
+        latest_file.write_text("<html></html>", encoding="utf-8")
+        payload_latest = dict(payload_missing)
+        payload_latest["usage_report_path"] = str(latest_file)
+        res_latest = validate_final_response_report_link(payload_latest, supervisor_run_id="run-100")
+        assert res_latest.is_valid is False
+        assert "Rejected latest alias path" in (res_latest.fail_closed_reason or "")
+
+        # 4. Forbidden visualization path
+        viz_file = mock_dir / ".codex" / "visualizations" / "run-100.html"
+        viz_file.parent.mkdir(parents=True, exist_ok=True)
+        viz_file.write_text("<html></html>", encoding="utf-8")
+        payload_viz = dict(payload_missing)
+        payload_viz["usage_report_path"] = str(viz_file)
+        res_viz = validate_final_response_report_link(payload_viz, supervisor_run_id="run-100")
+        assert res_viz.is_valid is False
+        assert "Rejected forbidden report path containing '.codex/visualizations'" in (res_viz.fail_closed_reason or "")
+    finally:
+        if mock_dir.exists():
+            import shutil
+            shutil.rmtree(mock_dir, ignore_errors=True)
+
+
+def test_validate_final_response_report_link_rejects_failed_status_and_invalid_payload():
+    """Verify FAILED status, invalid JSON, and missing supervisor_run_id fail closed."""
+    # 1. FAILED status
+    payload_failed = {
+        "run_id": "run-fail",
+        "usage_report_run_id": "run-fail",
+        "usage_report_status": "FAILED",
+        "usage_report_reason": "Failed to generate usage report: timeout",
+        "usage_report_path": None,
+    }
+    res_failed = validate_final_response_report_link(payload_failed, supervisor_run_id="run-fail")
+    assert res_failed.is_valid is False
+    assert "Report status not READY: Failed to generate usage report: timeout" in (res_failed.fail_closed_reason or "")
+
+    # 2. Malformed JSON string
+    res_bad_json = validate_final_response_report_link("{malformed", supervisor_run_id="run-1")
+    assert res_bad_json.is_valid is False
+    assert "JSON decode error" in (res_bad_json.fail_closed_reason or "")
+
+    # 3. Invalid payload type
+    res_bad_type = validate_final_response_report_link(12345, supervisor_run_id="run-1")  # type: ignore
+    assert res_bad_type.is_valid is False
+    assert "Invalid run_result payload type" in (res_bad_type.fail_closed_reason or "")
+
+    # 4. Missing supervisor_run_id
+    res_no_sup = validate_final_response_report_link(payload_failed, supervisor_run_id="")
+    assert res_no_sup.is_valid is False
+    assert "Missing or empty supervisor_run_id" in (res_no_sup.fail_closed_reason or "")
+
+
+def test_server_run_result_metadata_wiring_and_failed_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify server.run_result attaches provenance metadata and preserves FAILED isolation."""
+    from codex_agy_bridge import server as server_mod
+    from codex_agy_bridge.contracts import RunState, TaskContract
+    from codex_agy_bridge.run_control import DurableRunManager
+
+    db_file = tmp_path / "server_test.sqlite3"
+    manager = DurableRunManager(str(db_file))
+
+    task = TaskContract(
+        task_id="task-srv-001",
+        objective="Test server run_result wiring",
+        base_head="0123456789abcdef",
+        workdir=str(tmp_path),
+        allowed_paths=["src/test.py"],
+        forbidden_paths=[],
+        acceptance_criteria=["Passes"],
+    )
+    initial = manager.run_start(task, run_id="run-srv-001", auto_spawn=False)
+    manager.store.transition_run(initial.run_id, expected_version=1, target_state=RunState.QUEUED)
+    manager.store.transition_run(initial.run_id, expected_version=2, target_state=RunState.RUNNING)
+    manager.store.transition_run(initial.run_id, expected_version=3, target_state=RunState.VERIFYING)
+    manager.store.transition_run(
+        initial.run_id,
+        expected_version=4,
+        target_state=RunState.COMPLETE,
+        result_summary="Success",
+        verification_result={"passed": True, "status": "passed", "returncode": 0},
+    )
+
+    # 1. Normal execution of server.run_result
+    res_json = server_mod.run_result(str(db_file), "run-srv-001")
+    payload = json.loads(res_json)
+
+    assert payload["run_id"] == "run-srv-001"
+    assert payload["usage_report_status"] == "READY"
+    assert payload["usage_report_run_id"] == "run-srv-001"
+    assert "usage_report_path" in payload
+    assert "usage_report_uri" in payload
+    assert "usage_report_origin" in payload
+    assert "usage_report_db_classification" in payload
+    assert "usage_report_event_provenance" in payload
+
+    # Since we are running in pytest, the ambient origin is TEST and DB is TEST_LEDGER
+    assert payload["usage_report_origin"] == "TEST"
+    assert payload["usage_report_db_classification"] == "TEST_LEDGER"
+
+    # Gating check on this test payload must fail closed!
+    gate_res = validate_final_response_report_link(payload, supervisor_run_id="run-srv-001")
+    assert gate_res.is_valid is False
+    assert gate_res.markdown_link is None
+
+    # 2. Simulated failure in report generation -> preserves FAILED isolation
+    def failing_write(*args, **kwargs):
+        raise OSError("Simulated disk error during report writing")
+
+    monkeypatch.setattr("codex_agy_bridge.usage_reports.write_stable_report", failing_write)
+
+    res_fail_json = server_mod.run_result(str(db_file), "run-srv-001")
+    payload_fail = json.loads(res_fail_json)
+
+    assert payload_fail["usage_report_status"] == "FAILED"
+    assert payload_fail["usage_report_path"] is None
+    assert payload_fail["usage_report_uri"] is None
+    assert "Simulated disk error" in payload_fail["usage_report_reason"]
+    assert payload_fail["usage_report_origin"] is None
+    assert payload_fail["usage_report_run_id"] == "run-srv-001"
+    assert payload_fail["usage_report_db_classification"] is None
+    assert payload_fail["usage_report_event_provenance"] is None
+
+    gate_fail_res = validate_final_response_report_link(payload_fail, supervisor_run_id="run-srv-001")
+    assert gate_fail_res.is_valid is False
+    assert gate_fail_res.markdown_link is None
+    assert "Report status not READY" in (gate_fail_res.fail_closed_reason or "")

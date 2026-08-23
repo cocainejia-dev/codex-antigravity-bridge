@@ -201,8 +201,11 @@ After a durable run finishes and the Supervisor independently verifies its resul
 query telemetry with the exact durable `run_id` (never `--latest` guessing).
 `run_result(db_path, run_id)` returns `usage_report_status` (`READY` or `FAILED`),
 an absolute `usage_report_path`, a `usage_report_uri`, and a secret-redacted
-`usage_report_reason`. For `READY`, append a concise Chinese Markdown link to the
-exact `<run_id>.html` report plus the absolute local path fallback. For `FAILED`,
+`usage_report_reason`. For `READY`, append a concise Chinese Markdown link only
+after `validate_final_response_report_link` confirms exact run binding, existing
+file, PRODUCTION origin, PRODUCTION_LEDGER classification, and
+CONFIRMED_PRODUCTION event provenance. Reject TEST/CI, pytest temporary paths,
+latest aliases, and visualization artifacts. For `FAILED` or rejected provenance,
 report the failure transparently and state that report generation is observational:
 it cannot alter the task result or trigger a rerun. Token/quota values remain
 `UNAVAILABLE`; call share is labeled `DERIVED` (`调用占比`); secrets are redacted.

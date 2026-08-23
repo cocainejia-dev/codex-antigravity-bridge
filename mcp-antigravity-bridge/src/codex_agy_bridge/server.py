@@ -524,6 +524,10 @@ def run_result(
         payload["usage_report_path"] = str(out_file.resolve())
         payload["usage_report_uri"] = target_uri
         payload["usage_report_reason"] = None
+        payload["usage_report_origin"] = report_data.get("usage_report_origin")
+        payload["usage_report_run_id"] = record.run_id
+        payload["usage_report_db_classification"] = report_data.get("usage_report_db_classification")
+        payload["usage_report_event_provenance"] = report_data.get("usage_report_event_provenance")
     except Exception as exc:
         try:
             from .telemetry import redact_metadata
@@ -534,6 +538,10 @@ def run_result(
         payload["usage_report_path"] = None
         payload["usage_report_uri"] = None
         payload["usage_report_reason"] = f"Failed to generate usage report: {safe_reason}"
+        payload["usage_report_origin"] = None
+        payload["usage_report_run_id"] = record.run_id
+        payload["usage_report_db_classification"] = None
+        payload["usage_report_event_provenance"] = None
 
     return json.dumps(payload, ensure_ascii=False)
 

@@ -28,14 +28,18 @@ from typing import Any, Mapping, Sequence
 from .telemetry import (
     EventOrigin,
     MeasurementSource,
+    TelemetryDbClassification,
     UsageEvent,
     UsageLedger,
     UsageSummary,
     aggregate_events,
+    classify_telemetry_db,
     deterministic_json_dumps,
+    evaluate_event_provenance,
     get_default_telemetry_db_path,
     normalize_project_path,
     paths_equal,
+    resolve_default_origin,
 )
 from .telemetry_hooks import get_telemetry_ledger
 from .usage_reports import (
@@ -44,7 +48,6 @@ from .usage_reports import (
     resolve_report_path,
     write_stable_report,
 )
-
 
 def build_parser() -> argparse.ArgumentParser:
     """Build argparse parser for `codex-agy-bridge usage`."""
@@ -143,15 +146,27 @@ def build_usage_report_data(
     db_path_str: str | None = None,
     is_latest_requested: bool = False,
     latest_info: dict[str, Any] | None = None,
+    origin: str | EventOrigin | None = None,
 ) -> dict[str, Any]:
-    """Query ledger and construct structured telemetry report data dictionary."""
+    """Query ledger and construct structured telemetry report data dictionary with provenance metadata."""
+    norm_proj = normalize_project_path(project_dir)
+    effective_db_path = db_path_str or (str(ledger.db_path) if ledger.db_path else ":memory:")
+    db_classification = classify_telemetry_db(effective_db_path, origin=origin)
+    resolved_origin_enum = resolve_default_origin(origin)
+    resolved_origin = resolved_origin_enum.value
+
     if is_latest_requested and latest_info is None:
         # No confirmed production run found
         summary = UsageSummary()
-        norm_proj = normalize_project_path(project_dir)
+        prov_eval = evaluate_event_provenance([], expected_run_id=None, expected_origin=origin)
+        usage_report_origin = resolved_origin
+        usage_report_run_id = None
+        usage_report_db_classification = db_classification
+        usage_report_event_provenance = prov_eval["classification"]
+
         return {
             "filters": {
-                "db_path": db_path_str or str(ledger.db_path) if ledger.db_path else ":memory:",
+                "db_path": effective_db_path,
                 "run_id": None,
                 "task_id": None,
                 "project_dir": norm_proj,
@@ -159,7 +174,19 @@ def build_usage_report_data(
                 "until": str(until) if until is not None else None,
                 "latest": True,
                 "latest_found": False,
+                "usage_report_origin": usage_report_origin,
+                "usage_report_run_id": usage_report_run_id,
+                "usage_report_db_classification": usage_report_db_classification,
+                "usage_report_event_provenance": usage_report_event_provenance,
+                "origin": usage_report_origin,
+                "db_classification": usage_report_db_classification,
+                "event_provenance": usage_report_event_provenance,
             },
+            "usage_report_origin": usage_report_origin,
+            "usage_report_run_id": usage_report_run_id,
+            "usage_report_db_classification": usage_report_db_classification,
+            "usage_report_event_provenance": usage_report_event_provenance,
+            "event_provenance_details": prov_eval,
             "message": "No confirmed production run found in telemetry ledger.",
             "summary": summary.to_dict(),
             "codex": {"calls": 0, "monitoring_turns": 0.0, "resumptions": 0},
@@ -218,6 +245,16 @@ def build_usage_report_data(
         end_time=until,
     )
     summary = aggregate_events(events)
+
+    prov_eval = evaluate_event_provenance(
+        events,
+        expected_run_id=run_id,
+        expected_origin=origin,
+    )
+    usage_report_origin = prov_eval.get("primary_origin") or resolved_origin
+    usage_report_run_id = run_id if run_id else (latest_info.get("run_id") if latest_info else None)
+    usage_report_db_classification = db_classification
+    usage_report_event_provenance = prov_eval.get("classification", "UNKNOWN_PROVENANCE")
 
     # Actor totals
     totals_codex = summary.totals_by_actor.get("codex", {})
@@ -297,15 +334,20 @@ def build_usage_report_data(
         "lines_of_code": int(agy_lines),
     }
 
-    norm_proj = normalize_project_path(project_dir)
-
     filters_dict: dict[str, Any] = {
-        "db_path": db_path_str or str(ledger.db_path) if ledger.db_path else ":memory:",
+        "db_path": effective_db_path,
         "run_id": run_id,
         "task_id": task_id,
         "project_dir": norm_proj,
         "since": str(since) if since is not None else None,
         "until": str(until) if until is not None else None,
+        "usage_report_origin": usage_report_origin,
+        "usage_report_run_id": usage_report_run_id,
+        "usage_report_db_classification": usage_report_db_classification,
+        "usage_report_event_provenance": usage_report_event_provenance,
+        "origin": usage_report_origin,
+        "db_classification": usage_report_db_classification,
+        "event_provenance": usage_report_event_provenance,
     }
     if is_latest_requested:
         filters_dict["latest"] = True
@@ -320,6 +362,11 @@ def build_usage_report_data(
 
     return {
         "filters": filters_dict,
+        "usage_report_origin": usage_report_origin,
+        "usage_report_run_id": usage_report_run_id,
+        "usage_report_db_classification": usage_report_db_classification,
+        "usage_report_event_provenance": usage_report_event_provenance,
+        "event_provenance_details": prov_eval,
         "summary": summary.to_dict(),
         "codex": {
             "calls": int(codex_calls),
