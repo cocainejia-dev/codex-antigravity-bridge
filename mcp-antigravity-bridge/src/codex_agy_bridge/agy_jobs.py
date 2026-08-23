@@ -341,6 +341,28 @@ class AgyJobRegistry:
                     rec.persistence_degraded = True
                     rec.persistence_error = f"DURABLE_STORE_ERROR: {err}"
 
+        try:
+            from .telemetry_hooks import record_agy_job_completion_event
+            err_kind: str | None = None
+            if state == "failed":
+                if result is not None:
+                    err_kind = classify_agy_error(result.text, result.stderr)
+                elif exc is not None:
+                    err_kind = classify_agy_error(str(exc))
+            record_agy_job_completion_event(
+                job_id=job_id,
+                task_key=record.task_key if "record" in locals() and record else None,
+                workdir=record.workdir if "record" in locals() and record else None,
+                elapsed_seconds=elapsed,
+                exit_code=exit_code,
+                error_kind=err_kind,
+                result_text=text,
+                error_text=error,
+                db_path=self._store.db_path,
+            )
+        except Exception:
+            pass
+
         self._maybe_prune_store_terminal()
 
     def _compute_elapsed_seconds(self, record: _JobRecord) -> float:
@@ -418,6 +440,17 @@ class AgyJobRegistry:
             owner_session_id=self.bridge_session_id,
             now_iso=now_iso,
         )
+
+        try:
+            from .telemetry_hooks import record_agy_job_start_event
+            record_agy_job_start_event(
+                job_id=job_id,
+                task_key=task_key,
+                workdir=workdir,
+                db_path=self._store.db_path,
+            )
+        except Exception:
+            pass
 
         with self._lock:
             closed_early = self._closed

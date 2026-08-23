@@ -7,13 +7,14 @@ import json
 import math
 from pathlib import Path
 import threading
+import time
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from .agy_collaboration import agy_collaborations
 from .agy_jobs import agy_jobs
-from .agy_runner import AgyResult, describe_agy_failure, run_agy
+from .agy_runner import AgyResult, classify_agy_error, describe_agy_failure, run_agy
 from .contracts import (
     AutoCommitPolicy,
     InvalidStateTransitionError,
@@ -140,13 +141,29 @@ def agy_ask(
         timeout: Hard wall-clock timeout in seconds.
         dangerously_skip_permissions: Allow agy tools without interactive prompts.
     """
-    result = run_agy(
-        prompt,
-        workdir=workdir or None,
-        timeout=_validate_timeout(timeout),
-        dangerously_skip_permissions=dangerously_skip_permissions,
-    )
-    return _require_success(result).text
+    valid_timeout = _validate_timeout(timeout)
+    t0 = time.monotonic()
+    result: AgyResult | None = None
+    try:
+        result = run_agy(
+            prompt,
+            workdir=workdir or None,
+            timeout=valid_timeout,
+            dangerously_skip_permissions=dangerously_skip_permissions,
+        )
+        return _require_success(result).text
+    finally:
+        try:
+            from .telemetry_hooks import record_oneshot_call_event
+            record_oneshot_call_event(
+                prompt=prompt,
+                workdir=workdir or None,
+                duration_seconds=max(0.0, time.monotonic() - t0),
+                exit_code=result.exit_code if result is not None else 1,
+                error_kind=classify_agy_error(result.text, result.stderr) if (result is not None and result.exit_code != 0) else None,
+            )
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -160,19 +177,35 @@ def agy_ask_json(
 
     Uses `agy -p <prompt> --output-format json`.
     """
-    result = run_agy(
-        prompt,
-        workdir=workdir or None,
-        timeout=_validate_timeout(timeout),
-        output_format="json",
-        dangerously_skip_permissions=dangerously_skip_permissions,
-    )
-    _require_success(result)
+    valid_timeout = _validate_timeout(timeout)
+    t0 = time.monotonic()
+    result: AgyResult | None = None
     try:
-        json.loads(result.text)
-    except json.JSONDecodeError as exc:
-        raise ValueError("agy_ask_json did not return valid JSON") from exc
-    return result.text
+        result = run_agy(
+            prompt,
+            workdir=workdir or None,
+            timeout=valid_timeout,
+            output_format="json",
+            dangerously_skip_permissions=dangerously_skip_permissions,
+        )
+        _require_success(result)
+        try:
+            json.loads(result.text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("agy_ask_json did not return valid JSON") from exc
+        return result.text
+    finally:
+        try:
+            from .telemetry_hooks import record_oneshot_call_event
+            record_oneshot_call_event(
+                prompt=prompt,
+                workdir=workdir or None,
+                duration_seconds=max(0.0, time.monotonic() - t0),
+                exit_code=result.exit_code if result is not None else 1,
+                error_kind=classify_agy_error(result.text, result.stderr) if (result is not None and result.exit_code != 0) else None,
+            )
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -517,4 +550,17 @@ def run_resume(
             account_switched=account_switched,
             credentials_refreshed=credentials_refreshed,
         )
+        try:
+            from .telemetry_hooks import record_run_resume_event
+            record_run_resume_event(
+                run_id=resumed.run_id,
+                task_id=resumed.task_id,
+                project_dir=resumed.worktree,
+                attempt=resumed.attempt,
+                account_switched=account_switched,
+                credentials_refreshed=credentials_refreshed,
+                db_path=valid_db_path,
+            )
+        except Exception:
+            pass
     return json.dumps(resumed.to_dict(), ensure_ascii=False)
