@@ -767,12 +767,12 @@ class DurableRunManager:
         )
 
         try:
-            from .telemetry_hooks import record_run_start_event
+            from .telemetry_hooks import record_run_start_event, telemetry_path_for
             record_run_start_event(
                 run_id=persisted_record.run_id,
                 task_id=contract.task_id,
                 project_dir=worktree or contract.workdir,
-                db_path=self.store.db_path,
+                db_path=telemetry_path_for(self.store.db_path),
             )
         except Exception:
             pass
@@ -831,7 +831,7 @@ class DurableRunManager:
                 self.store.update_heartbeat(run_id)
 
                 try:
-                    from .telemetry_hooks import record_worker_launch_event
+                    from .telemetry_hooks import record_worker_launch_event, telemetry_path_for
                     record_worker_launch_event(
                         run_id=run_id,
                         task_id=contract.task_id,
@@ -839,7 +839,7 @@ class DurableRunManager:
                         attempt=running_record.attempt,
                         repair_round=running_record.repair_round,
                         worker_identity=self.store.get_worker_identity(run_id),
-                        db_path=self.store.db_path,
+                        db_path=telemetry_path_for(self.store.db_path),
                     )
                 except Exception:
                     pass
@@ -877,7 +877,11 @@ class DurableRunManager:
                     worker_result = WorkerResult(success=True, result_summary="Completed successfully")
 
                 try:
-                    from .telemetry_hooks import record_account_switch_event, record_worker_completion_event
+                    from .telemetry_hooks import (
+                        record_account_switch_event,
+                        record_worker_completion_event,
+                        telemetry_path_for,
+                    )
                     record_worker_completion_event(
                         run_id=run_id,
                         task_id=contract.task_id,
@@ -887,7 +891,7 @@ class DurableRunManager:
                         target_state=worker_result.target_state.value if worker_result.target_state else None,
                         last_error=worker_result.last_error,
                         verification_result=worker_result.verification_result,
-                        db_path=self.store.db_path,
+                        db_path=telemetry_path_for(self.store.db_path),
                     )
                     if worker_result.target_state == RunState.ACCOUNT_SWITCH_REQUIRED:
                         record_account_switch_event(
@@ -895,7 +899,7 @@ class DurableRunManager:
                             task_id=contract.task_id,
                             project_dir=worktree or contract.workdir,
                             reason=worker_result.suspended_reason or worker_result.last_error,
-                            db_path=self.store.db_path,
+                            db_path=telemetry_path_for(self.store.db_path),
                         )
                 except Exception:
                     pass
@@ -980,7 +984,7 @@ class DurableRunManager:
 
             except Exception as exc:
                 try:
-                    from .telemetry_hooks import record_worker_completion_event
+                    from .telemetry_hooks import record_worker_completion_event, telemetry_path_for
                     record_worker_completion_event(
                         run_id=run_id,
                         task_id=contract.task_id,
@@ -988,7 +992,7 @@ class DurableRunManager:
                         duration_seconds=max(0.0, time.monotonic() - worker_t0) if "worker_t0" in locals() else 0.0,
                         success=False,
                         last_error=str(exc),
-                        db_path=self.store.db_path,
+                        db_path=telemetry_path_for(self.store.db_path),
                     )
                 except Exception:
                     pass
@@ -1217,7 +1221,11 @@ class DurableRunManager:
                 last_error=reason,
             )
             try:
-                from .telemetry_hooks import record_reconciliation_event, record_timeout_event
+                from .telemetry_hooks import (
+                    record_reconciliation_event,
+                    record_timeout_event,
+                    telemetry_path_for,
+                )
                 if "timed out" in reason.lower() or "timeout" in reason.lower():
                     record_timeout_event(
                         run_id=interrupted.run_id,
@@ -1225,7 +1233,7 @@ class DurableRunManager:
                         project_dir=interrupted.worktree,
                         timeout_class="LOCAL_SUPERVISION_TIMEOUT",
                         error_text=reason,
-                        db_path=self.store.db_path,
+                        db_path=telemetry_path_for(self.store.db_path),
                     )
                 record_reconciliation_event(
                     run_id=interrupted.run_id,
@@ -1233,7 +1241,7 @@ class DurableRunManager:
                     project_dir=interrupted.worktree,
                     action="mark_interrupted",
                     reason=reason,
-                    db_path=self.store.db_path,
+                    db_path=telemetry_path_for(self.store.db_path),
                 )
             except Exception:
                 pass

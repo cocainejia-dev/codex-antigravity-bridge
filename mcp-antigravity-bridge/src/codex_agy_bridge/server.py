@@ -551,7 +551,7 @@ def run_resume(
             credentials_refreshed=credentials_refreshed,
         )
         try:
-            from .telemetry_hooks import record_run_resume_event
+            from .telemetry_hooks import record_run_resume_event, telemetry_path_for
             record_run_resume_event(
                 run_id=resumed.run_id,
                 task_id=resumed.task_id,
@@ -559,7 +559,7 @@ def run_resume(
                 attempt=resumed.attempt,
                 account_switched=account_switched,
                 credentials_refreshed=credentials_refreshed,
-                db_path=valid_db_path,
+                db_path=telemetry_path_for(valid_db_path),
             )
         except Exception:
             pass

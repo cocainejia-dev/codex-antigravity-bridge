@@ -44,6 +44,13 @@ _ledgers: dict[str, UsageLedger] = {}
 _ledgers_lock = threading.RLock()
 
 
+def telemetry_path_for(durable_db_path: str | Path) -> Path:
+    """Return the configured ledger, independent of durable-store lifetime."""
+    del durable_db_path
+    configured = os.environ.get("CODEX_AGY_TELEMETRY_DB")
+    return Path(configured.strip()) if configured and configured.strip() else get_default_telemetry_db_path()
+
+
 def get_telemetry_ledger(db_path: str | Path | None = None) -> UsageLedger:
     """Resolve or construct a thread-safe UsageLedger instance for the given DB path.
 
@@ -947,6 +954,7 @@ def record_avoided_duplicate_retry_event(
 
 __all__ = [
     "get_telemetry_ledger",
+    "telemetry_path_for",
     "reset_telemetry_ledgers",
     "safe_inspect_worktree_diff",
     "record_run_start_event",

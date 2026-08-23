@@ -342,7 +342,7 @@ class AgyJobRegistry:
                     rec.persistence_error = f"DURABLE_STORE_ERROR: {err}"
 
         try:
-            from .telemetry_hooks import record_agy_job_completion_event
+            from .telemetry_hooks import record_agy_job_completion_event, telemetry_path_for
             err_kind: str | None = None
             if state == "failed":
                 if result is not None:
@@ -358,7 +358,7 @@ class AgyJobRegistry:
                 error_kind=err_kind,
                 result_text=text,
                 error_text=error,
-                db_path=self._store.db_path,
+                db_path=telemetry_path_for(self._store.db_path),
             )
         except Exception:
             pass
@@ -442,12 +442,12 @@ class AgyJobRegistry:
         )
 
         try:
-            from .telemetry_hooks import record_agy_job_start_event
+            from .telemetry_hooks import record_agy_job_start_event, telemetry_path_for
             record_agy_job_start_event(
                 job_id=job_id,
                 task_key=task_key,
                 workdir=workdir,
-                db_path=self._store.db_path,
+                db_path=telemetry_path_for(self._store.db_path),
             )
         except Exception:
             pass

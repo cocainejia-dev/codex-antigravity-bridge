@@ -56,6 +56,7 @@ from codex_agy_bridge.telemetry_hooks import (  # noqa: E402
     record_worker_launch_event,
     reset_telemetry_ledgers,
     safe_inspect_worktree_diff,
+    telemetry_path_for,
 )
 
 
@@ -403,7 +404,7 @@ def test_durable_run_manager_telemetry_integration_and_no_observation_duplicates
         assert result.state == RunState.COMPLETE
 
         # Verify telemetry in ledger
-        ledger = get_telemetry_ledger(db_path)
+        ledger = get_telemetry_ledger(telemetry_path_for(db_path))
         events = ledger.query(run_id=record.run_id)
         assert len(events) >= 4  # run_start, worker_launch, worker_completion (calls, success, dur, tokens, turns)
 
@@ -454,7 +455,7 @@ def test_durable_run_manager_timeout_and_interrupted_telemetry():
         obs1 = mgr.run_observe(r.run_id, stale_heartbeat_threshold_seconds=1.0)
         assert obs1.state == RunState.INTERRUPTED
 
-        ledger = get_telemetry_ledger(db_path)
+        ledger = get_telemetry_ledger(telemetry_path_for(db_path))
         to_events_1 = ledger.query(run_id=r.run_id, measurement_type="timeout_count")
         assert len(to_events_1) == 1
 
@@ -491,7 +492,7 @@ def test_durable_run_manager_account_switch_telemetry():
         result = mgr.run_wait(record.run_id, timeout=5.0)
         assert result.state == RunState.ACCOUNT_SWITCH_REQUIRED
 
-        ledger = get_telemetry_ledger(db_path)
+        ledger = get_telemetry_ledger(telemetry_path_for(db_path))
         switch_events = ledger.query(run_id=record.run_id, measurement_type="account_switches")
         assert len(switch_events) == 1
         assert switch_events[0].actor == "bridge"
