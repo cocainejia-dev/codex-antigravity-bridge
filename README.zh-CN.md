@@ -18,6 +18,7 @@
   <a href="#mode-overview">模式总览</a> ·
   <a href="#tools">工具</a> ·
   <a href="#supervisor-mode">监督模式</a> ·
+  <a href="#usage-telemetry">用量遥测</a> ·
   <a href="README.md">英文项目首页</a> ·
   <a href="docs/README.md">文档索引</a> ·
   <a href="docs/demo.md">验证 Demo</a>
@@ -414,6 +415,67 @@ stateDiagram-v2
 ```
 
 Codex 会先把计划写入 `docs/agy-plans/`，创建并验证独立工作区，再把该目录作为 `workdir` 传给 `agy_start`。桥接器不会自动创建 Git 工作区，也不会替代监督者做边界审查。任务结束后检查 `agy_status`、差异和测试结果，再决定是否合并。
+
+<a id="usage-telemetry"></a>
+
+## 📊 用量遥测与工作量归因 (Usage Telemetry & Workload Attribution)
+
+桥接器内置了完全本地化的可观测用量遥测能力，支持对单次运行、项目目录与指定时间范围进行查询、聚合与可视化分析，无需任何外部遥测服务或数据上报。
+
+### 命令行查询与生成
+
+通过 `codex-agy-bridge usage`（或 `python -m codex_agy_bridge usage`）提供丰富的查询与导出选项：
+
+```powershell
+# 查询单次运行的可读文本报告
+codex-agy-bridge usage --run <run_id>
+
+# 按项目目录和时间范围过滤（支持 ISO 8601 或 Unix 时间戳）
+codex-agy-bridge usage --project "C:/work/my-app" --since "2026-08-01T00:00:00Z" --until "2026-08-23T23:59:59Z"
+
+# 导出确定性 JSON（严格按单位独立聚合，不混淆不兼容单位）
+codex-agy-bridge usage --project "C:/work/my-app" --json
+
+# 生成轻量、自包含、零外部依赖的 HTML 可视化报告
+codex-agy-bridge usage --project "C:/work/my-app" --html usage-report.html
+```
+
+### 计量来源与精度标签 (Measurement Sources)
+
+所有指标均显式标注数据来源与置信度级别：
+
+- `PROVIDER_EXACT`（置信度 `1.0`）：上游 API 官方直接返回的精确指标。
+- `CLI_EXACT`（置信度 `1.0`）：本地 CLI/进程边界直接捕获的精确数据（如进程执行时长秒数、调用次数、退出码等）。
+- `QUOTA_DELTA`（置信度 `0.8`）：操作前后观测到的配额窗口变化。
+- `TEXT_ESTIMATE`（置信度 `0.6`）：基于字符或词数的启发式 Token 估算。
+- `DERIVED`（置信度 `0.9`）：基于真实可观测工作量（代码行数、差异、轮数、时长）确切计算的派生指标。
+- `UNAVAILABLE`（置信度 `0.0`）：上游或环境无法直接观测的数据，显式标记为不可用，拒绝伪造。
+
+### 真实性原则：拒绝伪精度与虚假 Token 节省
+
+- 当前 Codex 和 Antigravity CLI 子进程边界并不暴露原始实时 Token 消耗或上游配额详情；因此 Token 和配额指标**明确标记为 `UNAVAILABLE`**。
+- 本项目坚守计量真实性原则：**绝不伪造虚假 Token 消耗、虚假成本折扣或合成倍率**。
+- 不兼容的计量单位（秒、调用次数、代码改动行数、轮数）**严格独立统计，绝不相加合并为虚假综合数字**。
+
+### 数据库存储与环境覆盖
+
+遥测日志采用懒加载独立 SQLite 架构，不破坏持久化监督器原有数据表：
+
+- **默认存储路径**：
+  - Windows: `%LOCALAPPDATA%\codex-agy-bridge\telemetry.sqlite3`
+  - Linux / macOS: `~/.local/share/codex-agy-bridge/telemetry.sqlite3`
+- **自定义路径**：可通过设置环境变量 `CODEX_AGY_TELEMETRY_DB` 或命令行参数 `--db <path>` 指定数据库文件。
+
+### 隐私安全保障
+
+- **不存储原始 Prompt**：用户 Prompt、系统 Prompt 及消息体绝不写入遥测库；如需关联，仅记录不可逆的 SHA-256 哈希（`[REDACTED_PROMPT_HASH:<hash>]`）。
+- **零凭证泄露**：OAuth 令牌、Bearer Token、Cookie、API Key、密码及 Authorization 请求头在落库前均自动执行多层敏感信息脱敏。
+- **纯本地留存**：遥测数据完全存储在本机 SQLite 中，绝不向任何外部网络服务发送数据。
+
+### 工作量归因与重复配额指标
+
+- **派生工作量归因 (Derived Workload Attribution)**：Codex（监督轮数、恢复次数、调用数）与 Antigravity（执行时长秒数、调用次数、改动文件数、代码差异行数 LOC）的分工对比基于真实执行日志，归因为 `DERIVED/ESTIMATED` 级别。
+- **重复配额指标 (Duplicate Quota Metrics)**：统计在超时对账或进程恢复中检测到的重复风险（`duplicate_quota_risks`）与成功避免的重复重试（`avoided_duplicate_retries`），作为 `DERIVED` 级可观测韧性指标，**不声称任何金钱或 Token 节省**。
 
 ## ⚙️ 配置与 Windows 支持
 

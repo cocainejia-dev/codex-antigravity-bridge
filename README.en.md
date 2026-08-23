@@ -5,7 +5,7 @@ Codex plans and reviews. Antigravity implements bounded tasks in isolated Git wo
 A local MCP bridge that lets Codex delegate independent coding tasks to the
 `agy` CLI, inspect the results, and keep the final merge decision with a human.
 
-[Quick Start](#quick-start) | [Demo](docs/demo.md) | [Security](SECURITY.md) | [中文说明](README.zh-CN.md)
+[Quick Start](#quick-start) | [Telemetry](#usage-telemetry--workload-attribution) | [Demo](docs/demo.md) | [Security](SECURITY.md) | [中文说明](README.zh-CN.md)
 
 ## Why this project
 
@@ -207,6 +207,65 @@ The bridge provides a layered MCP tool architecture separating basic agy delegat
 | `run_result` | Retrieve terminal result evidence (raises error if non-terminal) |
 | `run_cancel` | Cooperatively request cancellation for a run |
 | `run_resume` | Resume a suspended durable run on its existing task and worktree after an account switch or credential refresh |
+
+## Usage Telemetry & Workload Attribution
+
+The bridge provides built-in observational telemetry to query, aggregate, and inspect execution metrics across single runs, projects, and time ranges without external tracking or hosted telemetry servers.
+
+### CLI Reporting Commands
+
+Query and export telemetry via `codex-agy-bridge usage` (or `python -m codex_agy_bridge usage`):
+
+```powershell
+# Human-readable report for a single run
+codex-agy-bridge usage --run <run_id>
+
+# Filter by project directory and time window (ISO 8601 or epoch)
+codex-agy-bridge usage --project "C:/work/my-app" --since "2026-08-01T00:00:00Z" --until "2026-08-23T23:59:59Z"
+
+# Deterministic JSON output preserving separate unit totals
+codex-agy-bridge usage --project "C:/work/my-app" --json
+
+# Standalone, zero-dependency HTML visualization report
+codex-agy-bridge usage --project "C:/work/my-app" --html usage-report.html
+```
+
+### Measurement Sources & Precision Tags
+
+Every telemetry metric is explicitly tagged with a provenance source and confidence level:
+
+- `PROVIDER_EXACT` (`1.0`): Exact metric directly reported by upstream provider API.
+- `CLI_EXACT` (`1.0`): Exact measurement captured at the local CLI/process execution boundary (e.g. process duration seconds, call counts, exit codes).
+- `QUOTA_DELTA` (`0.8`): Observed quota window delta across operations.
+- `TEXT_ESTIMATE` (`0.6`): Heuristic token estimation based on character/word counts.
+- `DERIVED` (`0.9`): Aggregation computed strictly from recorded measurable workload (LOC, diffs, turns, durations).
+- `UNAVAILABLE` (`0.0`): Metric is not directly observable from the provider or environment.
+
+### Zero Fake Precision & Token Reality
+
+- Upstream Codex and Antigravity CLI subprocess boundaries do not expose real-time token counts or raw provider quotas. Consequently, token and quota metrics are explicitly marked `UNAVAILABLE`.
+- The bridge enforces strict metric honesty: it **never fabricates synthetic token counts, synthetic cost savings, or arbitrary discount multipliers**.
+- Incompatible units (seconds, calls, lines of code, turns) are preserved separately and **never summed into misleading composite totals**.
+
+### Telemetry Database & Storage Override
+
+Telemetry journals are stored in a local SQLite database using lazy, safe schema initialization that never alters durable supervisor tables:
+
+- **Default Location**:
+  - Windows: `%LOCALAPPDATA%\codex-agy-bridge\telemetry.sqlite3`
+  - Linux/macOS: `~/.local/share/codex-agy-bridge/telemetry.sqlite3`
+- **Override**: Set the `CODEX_AGY_TELEMETRY_DB` environment variable or pass `--db <path>` to target a custom database.
+
+### Privacy Guarantees
+
+- **No Raw Prompts**: User prompts, system prompts, and message bodies are never written to the telemetry database. When tracked for correlation, prompts are scrubbed to non-reversible SHA-256 digests (`[REDACTED_PROMPT_HASH:<hash>]`).
+- **No Secrets or Credentials**: OAuth tokens, Bearer headers, session cookies, API keys, passwords, and authorization headers are automatically scrubbed via multi-layer pattern redaction before persistence.
+- **Local-Only**: Telemetry data resides strictly on the local machine and is never transmitted to external services.
+
+### Workload Attribution & Duplicate Quota Metrics
+
+- **Derived Workload Attribution**: Workload breakdown between Codex (monitoring turns, resumptions, calls) and Antigravity (execution duration seconds, calls, modified files, LOC diffs) is classified as `DERIVED/ESTIMATED` based purely on recorded execution telemetry.
+- **Duplicate Quota Metrics**: Tracks operational resiliency events such as `duplicate_quota_risks` and `avoided_duplicate_retries` (redundant retries prevented during timeout reconciliation or crash recovery). These are classified as `DERIVED` observational metrics and are **not claimed as monetary or token savings**.
 
 ## Security and limits
 
