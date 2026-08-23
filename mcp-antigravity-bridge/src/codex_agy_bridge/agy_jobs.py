@@ -24,6 +24,7 @@ from .durable_jobs import (
     compute_prompt_hash,
     truncate_result_text,
 )
+from .timeout_diagnostics import diagnose_timeout
 
 
 def _utc_now_iso() -> str:
@@ -590,6 +591,7 @@ class AgyJobRegistry:
                     record.exc = ex
 
             if exc is not None:
+                err_kind = classify_agy_error(str(exc))
                 status = {
                     "job_id": job_id,
                     "state": "failed",
@@ -602,6 +604,13 @@ class AgyJobRegistry:
                     "heartbeat_at": record.heartbeat_at or record.completed_at,
                     "last_worktree_activity_at": record.last_worktree_activity_at,
                 }
+                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                    status["error_kind"] = err_kind
+                    status["timeout_diagnostic"] = diagnose_timeout(
+                        err_kind,
+                        remote_progress_evidence="UNKNOWN",
+                        worker_alive="NO",
+                    )
                 if record.task_key is not None:
                     status["task_key"] = record.task_key
                 if record.workdir is not None:
@@ -628,8 +637,16 @@ class AgyJobRegistry:
                     "last_worktree_activity_at": record.last_worktree_activity_at,
                 }
                 if state == "failed":
-                    status["error_kind"] = classify_agy_error(result.text, result.stderr)
+                    error_kind = classify_agy_error(result.text, result.stderr)
+                    status["error_kind"] = error_kind
                     status["error"] = describe_agy_failure(result)
+                    if error_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                        status["timeout_diagnostic"] = diagnose_timeout(
+                            error_kind,
+                            remote_progress_evidence="UNKNOWN",
+                            worker_alive="NO",
+                            diff_zero=False,
+                        )
                 if record.task_key is not None:
                     status["task_key"] = record.task_key
                 if record.workdir is not None:
@@ -711,6 +728,8 @@ class AgyJobRegistry:
                     "last_worktree_activity_at": durable["last_worktree_activity_at"],
                 }
             elif state == "failed":
+                err_text = durable["error"] or ""
+                err_kind = classify_agy_error(err_text)
                 status = {
                     "job_id": durable["job_id"],
                     "state": "failed",
@@ -718,7 +737,7 @@ class AgyJobRegistry:
                     "text": durable["result_text"] or "",
                     "result_truncated": bool(durable["result_truncated"]),
                     "exit_code": durable["exit_code"] if durable["exit_code"] is not None else 1,
-                    "error": durable["error"] or "unknown error",
+                    "error": err_text or "unknown error",
                     "submitted_at": durable["submitted_at"],
                     "started_at": durable["started_at"],
                     "completed_at": durable["completed_at"],
@@ -726,6 +745,13 @@ class AgyJobRegistry:
                     "heartbeat_at": durable["heartbeat_at"],
                     "last_worktree_activity_at": durable["last_worktree_activity_at"],
                 }
+                if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+                    status["error_kind"] = err_kind
+                    status["timeout_diagnostic"] = diagnose_timeout(
+                        err_kind,
+                        remote_progress_evidence="UNKNOWN",
+                        worker_alive="NO",
+                    )
             else:
                 status = {
                     "job_id": durable["job_id"],

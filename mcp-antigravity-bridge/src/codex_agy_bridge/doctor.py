@@ -548,7 +548,13 @@ def check_install_health(
         )
 
     missing: list[str] = []
-    for mod in ("mcp", "codex_agy_bridge.server", "codex_agy_bridge.setup", "codex_agy_bridge.verification"):
+    for mod in (
+        "mcp",
+        "codex_agy_bridge.server",
+        "codex_agy_bridge.setup",
+        "codex_agy_bridge.verification",
+        "codex_agy_bridge.timeout_diagnostics",
+    ):
         try:
             importlib.import_module(mod)
         except Exception as exc:
@@ -567,6 +573,32 @@ def check_install_health(
         details=f"Broken or missing components: {'; '.join(missing)}",
         what_to_do_next="Reinstall bridge dependencies: 'pip install -e .' or 'pip install mcp'.",
     )
+
+
+def check_timeout_diagnostics() -> CheckResult:
+    try:
+        from .timeout_diagnostics import diagnose_timeout
+
+        res = diagnose_timeout("CONNECT_TIMEOUT", remote_progress_evidence="NO", worker_alive="NO")
+        if isinstance(res, dict) and res.get("retry_recommended") == "YES" and "guidance" in res:
+            return CheckResult(
+                name="Timeout Diagnostics",
+                status=CheckStatus.PASS,
+                details="Timeout diagnostic policy and secret-safe analyzer available",
+            )
+        return CheckResult(
+            name="Timeout Diagnostics",
+            status=CheckStatus.FAIL,
+            details="diagnose_timeout did not return expected structure",
+            what_to_do_next="Verify timeout_diagnostics module implementation.",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="Timeout Diagnostics",
+            status=CheckStatus.FAIL,
+            details=f"Timeout diagnostics unavailable: {exc}",
+            what_to_do_next="Ensure timeout_diagnostics.py is present and importable.",
+        )
 
 
 def check_skill_installation(
@@ -660,6 +692,7 @@ def run_doctor(
         check_headless_availability(which_fn=which_fn, platform=plat, winpty_available=winpty_available),
         check_auth_state(auth_checker=auth_checker, env=env, home_dir=home_dir),
         check_install_health(dependency_checker=dependency_checker),
+        check_timeout_diagnostics(),
         check_skill_installation(codex_home=codex_home),
         check_windows_conpty(platform=plat, winpty_available=winpty_available),
     ]

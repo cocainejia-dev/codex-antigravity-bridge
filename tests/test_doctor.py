@@ -426,7 +426,7 @@ def test_run_doctor_all_pass(tmp_path: Path) -> None:
     )
 
     assert report.overall_status == CheckStatus.PASS
-    assert len(report.checks) == 12
+    assert len(report.checks) == 13
     assert all(c.status == CheckStatus.PASS for c in report.checks)
 
 

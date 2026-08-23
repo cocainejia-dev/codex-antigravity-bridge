@@ -102,6 +102,9 @@ unverified test, or out-of-bound diff.
 - After timeout, `unknown`, permission/authentication blockage, or final stop,
   preserve the AGY worktree and branch. Record its absolute path and blocker so
   the user can inspect or resume it; do not clean or discard unverified work.
+- A zero diff is not proof of zero remote progress. Reconcile timeout class,
+  process and heartbeat liveness, durable state, output evidence, and worktree
+  activity before retrying; remote evidence forbids duplicate dispatch/replay.
 - Never use cleanup to hide forbidden changes or erase the user's baseline.
 
 ## Three-Call Correction Protocol

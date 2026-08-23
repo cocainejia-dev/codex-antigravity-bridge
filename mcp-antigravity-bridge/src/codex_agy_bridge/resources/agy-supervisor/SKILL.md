@@ -111,6 +111,12 @@ Stop when acceptance criteria and tests pass, there is no meaningful progress,
 scope changes, a permission/authentication blocker appears, a timeout occurs,
 or a user decision is required.
 
+After a timeout, `diff=0` only means no file change was observed; it does not
+prove that remote execution did not start or consume quota. Reconcile timeout
+classification, worker/process liveness, heartbeat, durable state, output
+evidence, and worktree activity before retrying. Remote evidence forbids
+duplicate dispatch or replay.
+
 Never store OAuth tokens or private machine configuration. See the reference
 protocol before every delegated implementation and the plan template before
 parallel worktree collaboration.

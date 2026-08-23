@@ -33,6 +33,7 @@ from .run_control import (
     RunNotTerminalError,
     WorkerResult,
 )
+from .timeout_diagnostics import evaluate_timeout_diagnostics
 from .recovery import RecoveryOrchestrator
 from .worker_binding import build_worker_callback
 
@@ -387,7 +388,12 @@ def run_status(
         raise ValueError("run_id must be a non-empty string")
     manager = DurableRunManager(valid_db_path)
     record = manager.run_status(run_id.strip())
-    return json.dumps(record.to_dict(), ensure_ascii=False)
+    payload = record.to_dict()
+    payload["timeout_diagnostic"] = evaluate_timeout_diagnostics(
+        error_text=record.last_error or "",
+        context={"state": record.state.value, "is_alive": record.state not in {RunState.COMPLETE, RunState.FAILED, RunState.CANCELLED}},
+    ).to_dict()
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -416,6 +422,14 @@ def run_observe(
         "reason": obs.reason,
         "record": obs.record.to_dict(),
     }
+    if obs.timeout_diagnostic is not None:
+        obs_dict["timeout_diagnostic"] = obs.timeout_diagnostic
+    else:
+        obs_dict["timeout_diagnostic"] = evaluate_timeout_diagnostics(
+            error_text=obs.reason or obs.record.last_error or "",
+            worker_alive=obs.is_alive,
+            context={"state": obs.state.value, "is_alive": obs.is_alive},
+        ).to_dict()
     return json.dumps(obs_dict, ensure_ascii=False)
 
 

@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable, Optional
 import uuid
 
+from .agy_runner import classify_agy_error
 from .contracts import (
     AutoCommitPolicy,
     InvalidStateTransitionError,
@@ -27,6 +28,7 @@ from .contracts import (
     normalize_path,
     validate_no_credentials,
 )
+from .timeout_diagnostics import diagnose_timeout
 
 TERMINAL_STATES: set[RunState] = {
     RunState.COMPLETE,
@@ -194,6 +196,7 @@ class RunObservation:
     recovery_state: RunState | None
     reason: str | None
     record: RunRecord
+    timeout_diagnostic: dict[str, Any] | None = None
 
 
 class DurableRunStore:
@@ -626,6 +629,31 @@ class _ActiveExecution:
     thread: threading.Thread | None = None
 
 
+def _evaluate_obs_timeout_diagnostic(
+    record: RunRecord,
+    is_alive: bool,
+    reason: str | None,
+) -> dict[str, Any] | None:
+    candidate_texts = [record.last_error, record.suspended_reason, reason]
+    combined = " ".join(c for c in candidate_texts if c)
+    if not combined:
+        return None
+    err_kind = classify_agy_error(combined)
+    if err_kind in ("CONNECT_TIMEOUT", "REMOTE_EXECUTION_TIMEOUT", "LOCAL_SUPERVISION_TIMEOUT"):
+        return diagnose_timeout(
+            err_kind,
+            remote_progress_evidence="UNKNOWN",
+            worker_alive="YES" if is_alive else "NO",
+        )
+    if "timed out" in combined.lower() or "timeout" in combined.lower() or "heartbeat" in combined.lower():
+        return diagnose_timeout(
+            "LOCAL_SUPERVISION_TIMEOUT",
+            remote_progress_evidence="UNKNOWN",
+            worker_alive="YES" if is_alive else "NO",
+        )
+    return None
+
+
 class DurableRunManager:
     """Durable run controller managing persistence, execution, heartbeats, and observation."""
 
@@ -641,6 +669,12 @@ class DurableRunManager:
         with self._process_registry_lock:
             self._active_executions = self._process_active_executions.setdefault(self._ownership_key, {})
             self._active_lock = self._process_active_locks.setdefault(self._ownership_key, threading.Lock())
+
+    def _finalize_observation(self, obs: RunObservation) -> RunObservation:
+        diag = _evaluate_obs_timeout_diagnostic(obs.record, obs.is_alive, obs.reason)
+        if diag is not None:
+            obs.timeout_diagnostic = diag
+        return obs
 
     def run_start(
         self,
@@ -936,34 +970,38 @@ class DurableRunManager:
 
         # Terminal runs
         if record.state in TERMINAL_STATES:
-            return RunObservation(
-                run_id=run_id,
-                state=record.state,
-                state_version=record.state_version,
-                is_terminal=True,
-                is_alive=False,
-                is_stale=False,
-                pid=record.pid,
-                heartbeat=record.heartbeat,
-                recovery_state=None,
-                reason=None,
-                record=record,
+            return self._finalize_observation(
+                RunObservation(
+                    run_id=run_id,
+                    state=record.state,
+                    state_version=record.state_version,
+                    is_terminal=True,
+                    is_alive=False,
+                    is_stale=False,
+                    pid=record.pid,
+                    heartbeat=record.heartbeat,
+                    recovery_state=None,
+                    reason=None,
+                    record=record,
+                )
             )
 
         # If already INTERRUPTED or RECOVERY_READY
         if record.state in (RunState.INTERRUPTED, RunState.RECOVERY_READY):
-            return RunObservation(
-                run_id=run_id,
-                state=record.state,
-                state_version=record.state_version,
-                is_terminal=False,
-                is_alive=False,
-                is_stale=True,
-                pid=record.pid,
-                heartbeat=record.heartbeat,
-                recovery_state=RunState.RECOVERY_READY,
-                reason=record.last_error or "Run previously interrupted",
-                record=record,
+            return self._finalize_observation(
+                RunObservation(
+                    run_id=run_id,
+                    state=record.state,
+                    state_version=record.state_version,
+                    is_terminal=False,
+                    is_alive=False,
+                    is_stale=True,
+                    pid=record.pid,
+                    heartbeat=record.heartbeat,
+                    recovery_state=RunState.RECOVERY_READY,
+                    reason=record.last_error or "Run previously interrupted",
+                    record=record,
+                )
             )
 
         # Check in-memory active execution
@@ -981,18 +1019,20 @@ class DurableRunManager:
         # In-process callback execution
         if is_in_process:
             if thread_alive:
-                return RunObservation(
-                    run_id=run_id,
-                    state=record.state,
-                    state_version=record.state_version,
-                    is_terminal=False,
-                    is_alive=True,
-                    is_stale=False,
-                    pid=record.pid,
-                    heartbeat=record.heartbeat,
-                    recovery_state=None,
-                    reason=None,
-                    record=record,
+                return self._finalize_observation(
+                    RunObservation(
+                        run_id=run_id,
+                        state=record.state,
+                        state_version=record.state_version,
+                        is_terminal=False,
+                        is_alive=True,
+                        is_stale=False,
+                        pid=record.pid,
+                        heartbeat=record.heartbeat,
+                        recovery_state=None,
+                        reason=None,
+                        record=record,
+                    )
                 )
             else:
                 # Manager was recreated or worker thread died without updating terminal state
@@ -1000,7 +1040,31 @@ class DurableRunManager:
                     record,
                     reason="In-process callback worker is no longer active (manager recreated or thread terminated)",
                 )
-                return RunObservation(
+                return self._finalize_observation(
+                    RunObservation(
+                        run_id=run_id,
+                        state=interrupted_record.state,
+                        state_version=interrupted_record.state_version,
+                        is_terminal=False,
+                        is_alive=False,
+                        is_stale=True,
+                        pid=record.pid,
+                        heartbeat=record.heartbeat,
+                        recovery_state=RunState.RECOVERY_READY,
+                        reason=interrupted_record.last_error or "In-process callback worker absent",
+                        record=interrupted_record,
+                    )
+                )
+
+        # External supervised process execution
+        pid_alive = is_pid_alive(record.pid)
+        if record.pid is not None and not pid_alive:
+            interrupted_record = self._mark_interrupted(
+                record,
+                reason=f"Worker process (PID {record.pid}) is no longer alive",
+            )
+            return self._finalize_observation(
+                RunObservation(
                     run_id=run_id,
                     state=interrupted_record.state,
                     state_version=interrupted_record.state_version,
@@ -1013,26 +1077,6 @@ class DurableRunManager:
                     reason=interrupted_record.last_error or "In-process callback worker absent",
                     record=interrupted_record,
                 )
-
-        # External supervised process execution
-        pid_alive = is_pid_alive(record.pid)
-        if record.pid is not None and not pid_alive:
-            interrupted_record = self._mark_interrupted(
-                record,
-                reason=f"Worker process (PID {record.pid}) is no longer alive",
-            )
-            return RunObservation(
-                run_id=run_id,
-                state=interrupted_record.state,
-                state_version=interrupted_record.state_version,
-                is_terminal=False,
-                is_alive=False,
-                is_stale=True,
-                pid=record.pid,
-                heartbeat=record.heartbeat,
-                recovery_state=RunState.RECOVERY_READY,
-                reason=f"Dead worker PID {record.pid}",
-                record=interrupted_record,
             )
 
         # External process heartbeat staleness check
@@ -1047,35 +1091,39 @@ class DurableRunManager:
                         record,
                         reason=f"Worker heartbeat timed out (age={age_seconds:.1f}s > {stale_heartbeat_threshold_seconds}s)",
                     )
-                    return RunObservation(
-                        run_id=run_id,
-                        state=interrupted_record.state,
-                        state_version=interrupted_record.state_version,
-                        is_terminal=False,
-                        is_alive=False,
-                        is_stale=True,
-                        pid=record.pid,
-                        heartbeat=record.heartbeat,
-                        recovery_state=RunState.RECOVERY_READY,
-                        reason="Heartbeat timed out",
-                        record=interrupted_record,
+                    return self._finalize_observation(
+                        RunObservation(
+                            run_id=run_id,
+                            state=interrupted_record.state,
+                            state_version=interrupted_record.state_version,
+                            is_terminal=False,
+                            is_alive=False,
+                            is_stale=True,
+                            pid=record.pid,
+                            heartbeat=record.heartbeat,
+                            recovery_state=RunState.RECOVERY_READY,
+                            reason="Heartbeat timed out",
+                            record=interrupted_record,
+                        )
                     )
             except Exception:
                 pass
 
         # External process is active and healthy
-        return RunObservation(
-            run_id=run_id,
-            state=record.state,
-            state_version=record.state_version,
-            is_terminal=False,
-            is_alive=True,
-            is_stale=False,
-            pid=record.pid,
-            heartbeat=record.heartbeat,
-            recovery_state=None,
-            reason=None,
-            record=record,
+        return self._finalize_observation(
+            RunObservation(
+                run_id=run_id,
+                state=record.state,
+                state_version=record.state_version,
+                is_terminal=False,
+                is_alive=True,
+                is_stale=False,
+                pid=record.pid,
+                heartbeat=record.heartbeat,
+                recovery_state=None,
+                reason=None,
+                record=record,
+            )
         )
 
     def _mark_interrupted(self, record: RunRecord, reason: str) -> RunRecord:
