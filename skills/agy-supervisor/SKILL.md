@@ -52,6 +52,12 @@ after delegation. The bridge does not create worktrees for `agy_start`.
   - `run_result`: retrieves verified terminal results (rejected if non-terminal) and automatically generates an exact-run Chinese HTML usage report (`<run_id>.html`).
   - `run_cancel`: cooperatively requests run cancellation.
   - `run_resume`: resumes a suspended run (e.g. `ACCOUNT_SWITCH_REQUIRED`) on its existing worktree and contract after account switch or credential refresh.
+- **Active supervision & continuity contract**:
+  - `ACTIVE_IS_FINAL = NO`: A worker in `running`, `queued`, or `in_progress` state is actively executing and is never a final result.
+  - `RUNNING_IS_STOP_CONDITION = NO` and `QUEUED_IS_STOP_CONDITION = NO`: Active execution is not a stop condition; never emit a final assistant response while a worker is running or queued.
+  - `WAIT_WINDOW_EXPIRED_IS_FINAL = NO`: Bounded wait-window expiry (`agy_wait` or `run_wait` returning before worker completion) is normal RPC window expiration, not worker termination or failure (`BOUNDED_WAIT_WINDOW_EXPIRED != TASK_TIMEOUT`, `BOUNDED_WAIT_WINDOW_EXPIRED != FAILURE`).
+  - `RUNNING + healthy heartbeat -> continue bounded wait/reconcile`: When `agy_wait` or `run_wait` returns `running` or `queued` with an active process or fresh heartbeat, continue active supervision via bounded wait or status reconciliation. Do not spawn duplicate replacement workers (`REPLACEMENT_WORKER = NO`).
+  - Only genuine terminal states (`completed`, `failed`, `cancelled`), hard worker timeout (elapsed beyond total task budget with no liveness), or explicit human blockers (permission denial, auth, account switch) can end active supervision.
 - **Exact-run usage report final-response contract**:
   - Supervisor must query `run_result` or usage report APIs using the exact durable `run_id` (never rely on `--latest` guessing).
   - `run_result` returns `usage_report_status` (`READY` or `FAILED`), `usage_report_path` (absolute local path), `usage_report_uri` (`file:///...`), and `usage_report_reason`.
@@ -127,9 +133,16 @@ temporary worktrees; otherwise create the caller-owned worktree and use
 the post-delegation audit and acceptance criteria pass. Use `agy_ask` only as a
 synchronous fallback when asynchronous tools are unavailable.
 
-Stop when acceptance criteria and tests pass, there is no meaningful progress,
-scope changes, a permission/authentication blocker appears, a timeout occurs,
-or a user decision is required.
+Stop active supervision only when acceptance criteria and tests pass, there is no meaningful
+progress after two corrective calls, scope changes, a permission/authentication blocker appears,
+a hard worker timeout occurs (elapsed beyond task limit with no liveness), or a user decision is
+required. Normal bounded wait-window expiry is never a stop condition.
+
+After a hard timeout, `diff=0` only means no file change was observed; it does not
+prove that remote execution did not start or consume quota. Reconcile timeout
+classification, worker/process liveness, heartbeat, durable state, output
+evidence, and worktree activity before retrying. Remote evidence forbids
+duplicate dispatch or replay.
 
 Never store OAuth tokens or private machine configuration. See the reference
 protocol before every delegated implementation and the plan template before
