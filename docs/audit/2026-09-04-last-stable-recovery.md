@@ -5,7 +5,7 @@
 - Recovery base: `8eabc389ccc383ada740b66901abbc1acf7b37f6`.
 - Base parent: `5c35e4d6148ecc081adeb2d7b86a7a45d93695e2` (`origin/main`).
 - Recovery branch: `recovery/agy-supervisor-last-stable-20260904`.
-- Recovery commit: `a6419f05724625d2a68dbc681bd6cea335fa02e3`.
+- Recovery commits: `a6419f05724625d2a68dbc681bd6cea335fa02e3` plus the final documentation closure commit recorded below.
 - Implementation executor: Codex. AGY was used only for isolated runtime verification.
 
 ## Forensic Discovery
@@ -86,5 +86,24 @@ no-write corrective call then passed:
 ## GitHub Preservation
 
 `recovery/agy-supervisor-last-stable-20260904` was pushed successfully and
-verified with `git ls-remote` at `a6419f05724625d2a68dbc681bd6cea335fa02e3`.
+verified with `git ls-remote` at `02e41f5d1e9d747e6812fee62522ccc07e322220`
+before this documentation-only closure update. The PR was created as #1 with
+head SHA `02e41f5d1e9d747e6812fee62522ccc07e322220`, base `main`, and
+auto-merge disabled. The exact-head Hosted CI run was `33879466885` and
+completed successfully for Ubuntu 3.10/3.12 and Windows 3.10/3.12.
+
+## Fresh Host and Stable Marker
+
+- `INSTALLED_SKILL_PATH`: `D:\CodexData\.codex\skills\agy-supervisor\SKILL.md`.
+- `INSTALLED_SKILL_SHA256`: `0509F007D32F70340F466C0BF6580858C9ABD679FE68628A4778AF3F90E26B23`.
+- Fresh `codex exec` loaded the same absolute path and SHA-256; literal continuity markers were both present.
+- `FRESH_HOST_PROVENANCE`: `PASS`.
+- `PRODUCTION_SUPERVISOR_SANITY`: `PASS` by hash-bound reuse of job `94dbcaaa7f514bd59dbe5499af4d761a`; no new implementation or Bridge restart was needed.
+- `STABLE_SUPERVISOR_SHA`: final recovery documentation closure commit (the exact full SHA is the tag target after this commit).
+- `STABLE_SUPERVISOR_TAG`: `agy-supervisor-stable-20260904`.
+
+The stable tag must target the final documentation closure commit, not the
+pre-closure `main`, `8eabc389`, or the earlier `02e41f5` head. The tag is an
+annotated marker only; no GitHub Release is created.
+
 `main` and `codex/agy-supervisor-continuity-20260827` were not modified.
