@@ -2,7 +2,7 @@
 
 ## Canonical Authority
 
-- `CANONICAL_REPO`: `D:\软件开发\git仓库\桥接git仓库`.
+- `CANONICAL_REPO`: `D:\CODEX项目\agy-bridge`.
 - `REPOSITORY_IDENTITY`: `codex-agy-supervised-bridge`; role `authoritative`.
 - `RUNTIME_RESOLVED_HEAD`: discover at startup; do not write the containing
   commit hash into the recovery anchor.
@@ -101,7 +101,7 @@ environment.
 - AGY executable: `C:\Users\28760\AppData\Local\agy\bin\agy.EXE`.
 - Active MCP registration and Codex config live outside Git.
 - The global editable legacy `.pth` may remain installed, but canonical MCP
-  must use `D:\软件开发\git仓库\桥接git仓库\.venv\Scripts\python.exe` and
+  must use `D:\CODEX项目\agy-bridge\.venv\Scripts\python.exe` and
   must not import it.
 - Durable job databases, processes, heartbeats, and temporary worktrees are
   machine-local evidence, not portable project state.

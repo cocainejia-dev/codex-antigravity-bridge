@@ -111,7 +111,7 @@ Blocker or permission error: {{blocker_or_none}}
 
 After a verified merge, record the merge result and confirm no uncommitted AGY
 changes remain before removing the temporary worktree and deleting its fully
-merged temporary branch. After timeout, `unknown`, permission/authentication
+merged temporary branch. After hard timeout, `unknown`, permission/authentication
 blockage, or final stop, preserve the AGY worktree and branch and record their
 absolute paths for inspection or resume. Never clean unverified work or erase
 the user's baseline.
@@ -121,8 +121,9 @@ the user's baseline.
 - Tests and acceptance criteria pass.
 - A task changes a forbidden file or leaves its worktree.
 - The worker asks for a user decision, authentication, or broader permission.
-- The worker times out or makes no meaningful progress after two corrections.
+- The worker reaches a hard task timeout or makes no meaningful progress after two corrections.
 - A permission blocker persists or the task scope becomes unclear.
+- Note: Normal bounded wait-window expiry while the worker is running/queued is NOT a stop condition (`RUNNING_IS_STOP_CONDITION = NO`, `BOUNDED_WAIT_WINDOW_EXPIRED != TASK_TIMEOUT`).
 
 ## Merge Checklist
 

@@ -1,6 +1,6 @@
 # Repository and Runtime Inventory
 
-`D:\软件开发\git仓库\桥接git仓库` is the sole authoritative repository,
+`D:\CODEX项目\agy-bridge` is the sole authoritative repository,
 development worktree, verification source, release source, and Codex handoff
 entry point.
 

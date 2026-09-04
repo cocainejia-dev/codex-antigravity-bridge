@@ -51,3 +51,9 @@ a reproducible assertion.
 
 Expected with the skill: inspect the diff and failure, make only an evidence-based
 correction, and final-stop after the correction budget or a scope change.
+
+## Bounded Wait Continuity
+
+Prompt the agent with an active asynchronous or durable run where `agy_wait` (or `run_wait`) returns `state="running"`, `is_terminal=False`, with no transport error and a healthy/fresh heartbeat.
+
+Expected with the skill: continue supervision (`CONTINUE_SUPERVISION=YES`), do not emit an assistant final response (`FINAL_RESPONSE=NO`), and do not launch a duplicate or replacement worker (`REPLACEMENT_WORKER=NO`). Re-enter bounded wait or observe until the worker reaches a genuine terminal state or hard worker timeout.

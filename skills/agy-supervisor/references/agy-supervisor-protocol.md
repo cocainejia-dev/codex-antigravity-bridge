@@ -59,16 +59,26 @@ Classify the raw result before reporting it:
 
 | State | Detection | Required action |
 | --- | --- | --- |
+| `running` / `queued` | Non-terminal active state from `agy_status`, `agy_wait`, `run_status`, or `run_wait`; heartbeat is healthy. | `ACTIVE_IS_FINAL = NO`, `RUNNING_IS_STOP_CONDITION = NO`, `QUEUED_IS_STOP_CONDITION = NO`. Continue bounded wait/observe; do NOT emit final response; do NOT spawn duplicate worker (`REPLACEMENT_WORKER = NO`). |
 | `succeeded` | Usable output, acceptable exit code, no permission/authentication error, acceptance criteria pass. | Audit status, diff, worktree, and tests, then report verified success. |
 | `permission_blocked` | Permission denial, auto-denial, or permission-caused `no output produced`, including exit code 0. | Preserve scope; request exact authorization before retrying. |
 | `authentication_blocked` | Login, credential, or authentication failure. | Stop and ask for interactive authentication. |
 | `account_switch_required` | Model quota exhaustion or rate limit encountered. | Preserve worktree and code changes; prompt user for interactive `agy` account switch, then call `run_resume`. |
-| `account_switch_required` | Model quota exhaustion or rate limit encountered. | Preserve worktree and code changes; prompt user for interactive `agy` account switch, then call `run_resume`. |
 | `empty_output` | No usable output and no more specific blocker. | Inspect the runner/PTY path; do not infer success. |
 | `invalid_output` | `agy_ask_json` returns unparsable JSON or violates the requested schema. | Treat as failed; issue only a bounded corrective call when justified. |
-| `timed_out` | Hard timeout reached. | Preserve the worktree; narrow scope or request a longer timeout. |
+| `timed_out` | Hard worker/task timeout reached (elapsed beyond task limit without liveness). | Preserve the worktree; narrow scope or request a longer timeout. |
 | `failed` | Nonzero exit code or unclassified error. | Capture the exact error and inspect allowed changes. |
 | `unknown` | `agy_status` cannot find the job, usually after a bridge restart. | Preserve the worktree, inspect it manually, and do not restart blindly. |
+
+## Worker Liveness and Supervision Continuity Contract
+
+The supervisor must maintain active supervision until the worker reaches a genuine terminal state or an unresolvable human blocker.
+
+- `ACTIVE_IS_FINAL = NO`: A worker reported as `running`, `queued`, or `in_progress` is actively executing. An active state is never a final result.
+- `RUNNING_IS_STOP_CONDITION = NO` and `QUEUED_IS_STOP_CONDITION = NO`: Active execution is not a stop condition. The supervisor must never terminate its turn with a final assistant response while the delegated worker is active.
+- `WAIT_WINDOW_EXPIRED_IS_FINAL = NO`: Bounded wait tools (`agy_wait`, `run_wait`) return when their bounded polling window elapses (e.g. 30s or 60s). This is normal RPC window expiration, NOT task completion, NOT hard worker timeout, and NOT worker failure (`BOUNDED_WAIT_WINDOW_EXPIRED != TASK_TIMEOUT`, `BOUNDED_WAIT_WINDOW_EXPIRED != FAILURE`).
+- `RUNNING + healthy heartbeat -> continue bounded wait/reconcile`: When `agy_wait` or `run_wait` returns `running` or `queued` with a healthy heartbeat and active process, the supervisor must continue active supervision (`CONTINUE_SUPERVISION = YES`, `FINAL_RESPONSE = NO`, `REPLACEMENT_WORKER = NO`). Re-enter bounded wait or status reconciliation. Never launch duplicate replacement workers.
+- Only genuine terminal states (`completed`, `failed`, `cancelled`), hard worker timeout (elapsed beyond total task budget without liveness/heartbeat), or explicit human blockers (`permission_blocked`, `authentication_blocked`, `account_switch_required`) can end active supervision.
 
 ## Worktree Lifecycle
 
@@ -101,9 +111,12 @@ unverified test, or out-of-bound diff.
 - After a verified merge, record the merge result, confirm no uncommitted AGY
   changes remain, then remove the temporary worktree and delete its temporary
   branch only when it is fully merged and no longer needed.
-- After timeout, `unknown`, permission/authentication blockage, or final stop,
+- After hard timeout, `unknown`, permission/authentication blockage, or final stop,
   preserve the AGY worktree and branch. Record its absolute path and blocker so
   the user can inspect or resume it; do not clean or discard unverified work.
+- A zero diff is not proof of zero remote progress. Reconcile timeout class,
+  process and heartbeat liveness, durable state, output evidence, and worktree
+  activity before retrying; remote evidence forbids duplicate dispatch/replay.
 - Never use cleanup to hide forbidden changes or erase the user's baseline.
 
 ## Three-Call Correction Protocol
@@ -229,6 +242,7 @@ sub-agent runs with both controls:
 | Permission failure | Continue only after exact authorization/allow-rule is recorded and the call budget remains. | Classify `permission_blocked`; request exact authorization. |
 | Unclear scope | Continue only when the user supplies a bounded task, workdir, ownership, forbidden files, and acceptance criteria. | Stop and request a bounded task. |
 | Test failure | Continue only for a reproducible failure with an in-bound diff and an evidence-based correction with a clear check. | Inspect evidence; final-stop at the call limit or scope change. |
+| Bounded wait continuity | Continue active supervision while worker is active (`running`/`queued`) with healthy heartbeat. | `CONTINUE_SUPERVISION=YES`, `FINAL_RESPONSE=NO`, `REPLACEMENT_WORKER=NO`. Continue bounded wait/reconciliation; do not emit final response or launch replacement worker. |
 
 The manual scenario prompts and scoring sheet live in
 `tests/agy_supervisor_pressure_scenarios.md`.

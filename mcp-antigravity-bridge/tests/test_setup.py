@@ -25,16 +25,16 @@ def test_resolve_proxy_reads_lowercase_environment_names(monkeypatch) -> None:
 def test_update_codex_config_preserves_unmanaged_settings(tmp_path: Path) -> None:
     config = tmp_path / "config.toml"
     config.write_text(
-        '[mcp_servers.codex-agy-bridge]\n'
+        "[mcp_servers.codex-agy-bridge]\n"
         'command = "python"\n'
         'args = ["-m", "codex_agy_bridge"]\n'
-        'startup_timeout_sec = 120\n'
-        '\n'
-        '[mcp_servers.codex-agy-bridge.env]\n'
+        "startup_timeout_sec = 120\n"
+        "\n"
+        "[mcp_servers.codex-agy-bridge.env]\n"
         'CUSTOM = "keep"\n'
         'HTTP_PROXY = "http://old:1"\n'
-        '\n'
-        '[projects]\n'
+        "\n"
+        "[projects]\n"
         'root = "keep"\n',
         encoding="utf-8",
     )
@@ -44,7 +44,7 @@ def test_update_codex_config_preserves_unmanaged_settings(tmp_path: Path) -> Non
 
     assert 'command = "C:\\\\Python\\\\python.exe"' in content
     assert 'args = ["-m", "codex_agy_bridge"]' in content
-    assert 'startup_timeout_sec = 120' in content
+    assert "startup_timeout_sec = 120" in content
     assert 'CUSTOM = "keep"' in content
     assert content.count('HTTP_PROXY = "http://127.0.0.1:7890"') == 1
     assert 'HTTP_PROXY = "http://old:1"' not in content
@@ -72,3 +72,22 @@ def test_packaged_skill_resource_matches_expected_files() -> None:
     assert (source / "SKILL.md").is_file()
     assert (source / "agents" / "openai.yaml").is_file()
     assert list((source / "references").glob("*.md"))
+
+
+def test_setup_copies_skill_with_continuity_contract(tmp_path: Path) -> None:
+    dest = tmp_path / "skills" / "agy-supervisor"
+    setup._copy_skill(dest)
+
+    assert (dest / "SKILL.md").is_file()
+    assert (dest / "references" / "agy-supervisor-protocol.md").is_file()
+
+    skill_text = (dest / "SKILL.md").read_text(encoding="utf-8")
+    protocol_text = (dest / "references" / "agy-supervisor-protocol.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ACTIVE_IS_FINAL = NO" in skill_text
+    assert "RUNNING_IS_STOP_CONDITION = NO" in skill_text
+    assert "WAIT_WINDOW_EXPIRED_IS_FINAL = NO" in protocol_text
+    assert "BOUNDED_WAIT_WINDOW_EXPIRED != TASK_TIMEOUT" in protocol_text
+    assert "REPLACEMENT_WORKER = NO" in protocol_text

@@ -5,7 +5,7 @@
   "canonical_repository": true,
   "repository_role": "authoritative",
   "active_mcp_identity": "codex-agy-vnext",
-  "machine_local_canonical_path": "D:\\软件开发\\git仓库\\桥接git仓库",
+  "machine_local_canonical_path": "D:\\CODEX项目\\agy-bridge",
   "legacy_repository_roles": {
     "D:\\软件开发\\codex-antigravity-vnext": "PRE_MIGRATION_REFERENCE_ONLY",
     "D:\\软件开发\\codex-antigravity-bridge": "LEGACY_REFERENCE_ONLY"
