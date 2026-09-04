@@ -18,7 +18,7 @@ without fresh regression evidence. Finish the takeover report and stop at
 
 The sole authoritative repository on the current machine is:
 
-`D:\软件开发\git仓库\桥接git仓库`
+`D:\CODEX项目\agy-bridge`
 
 That is a machine-local path hint, not a portable release requirement. A Codex
 Project/workspace may be elsewhere. First locate and verify the real Git root;

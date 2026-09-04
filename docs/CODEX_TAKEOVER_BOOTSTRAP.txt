@@ -1,4 +1,4 @@
-Canonical repo (machine-local): D:\软件开发\git仓库\桥接git仓库
+Canonical repo (machine-local): D:\CODEX项目\agy-bridge
 1. Locate the real Git root; do not create a second repository.
 2. Read AGENTS.md, then read docs/CODEX_TAKEOVER_PROMPT.md in full.
 3. Follow docs/RECOVERY.md cold-start checks read-only.

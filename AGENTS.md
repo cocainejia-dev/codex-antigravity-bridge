@@ -1,7 +1,7 @@
 # Codex AGY Supervisor
 
 PROJECT = Codex <-> Antigravity supervised autonomous bridge
-CANONICAL_REPO = D:\软件开发\git仓库\桥接git仓库
+CANONICAL_REPO = D:\CODEX项目\agy-bridge
 AUTHORITATIVE_REPO = canonical repository root
 ACTIVE_MCP_IDENTITY = codex-agy-vnext
 

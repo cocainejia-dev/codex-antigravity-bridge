@@ -4,7 +4,7 @@
   "repo_relative_identity": "codex-agy-supervised-bridge",
   "canonical_repository": true,
   "repository_role": "authoritative",
-  "machine_local_canonical_path": "D:\\软件开发\\git仓库\\桥接git仓库",
+  "machine_local_canonical_path": "D:\\CODEX项目\\agy-bridge",
   "active_mcp_identity": "codex-agy-vnext",
   "phase": "PHASE_11.4_RELEASE_HARDENING",
   "task": "WAITING_FOR_USER_DIRECTION",

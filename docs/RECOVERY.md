@@ -2,7 +2,7 @@
 
 This repository is the only authoritative development and handoff source:
 
-`CANONICAL_REPO = D:\软件开发\git仓库\桥接git仓库`
+`CANONICAL_REPO = D:\CODEX项目\agy-bridge`
 
 For a new client with no chat history:
 
@@ -27,7 +27,7 @@ For a new client with no chat history:
 The canonical runtime identity is `codex-agy-vnext`. Its MCP command must use
 the absolute interpreter:
 
-`D:\软件开发\git仓库\桥接git仓库\.venv\Scripts\python.exe -m codex_agy_bridge`
+`D:\CODEX项目\agy-bridge\.venv\Scripts\python.exe -m codex_agy_bridge`
 
 The global Python editable legacy package is evidence only. It must not affect
 canonical imports, and it must not be removed or modified as part of recovery.
