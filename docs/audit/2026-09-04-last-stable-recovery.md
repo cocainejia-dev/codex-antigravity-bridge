@@ -107,3 +107,13 @@ pre-closure `main`, `8eabc389`, or the earlier `02e41f5` head. The tag is an
 annotated marker only; no GitHub Release is created.
 
 `main` and `codex/agy-supervisor-continuity-20260827` were not modified.
+
+## Subsequent Acceptance-Hardening Chain
+
+The immutable rollback candidate remains `agy-supervisor-stable-20260904`
+(`436291b6f8b0511f997a5ababe54f0e0cddc23a5`). The acceptance-hardening work is
+developed from GitHub `main` at `cb0878df34a50543bcbb7f282b2777b385b868b8` on
+`codex/agy-supervisor-acceptance-hardening-20260905`; after merge and exact-main
+CI verification, the new annotated marker is
+`agy-supervisor-stable-20260905`, targeting that verified merge commit. Normal
+source remains `main`; rollback candidates remain immutable stable tags.

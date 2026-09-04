@@ -64,6 +64,7 @@ class _TaskRecord:
     workdir: Path
     branch: str
     job_id: str | None = None
+    baseline: Any | None = None
 
 
 @dataclass
@@ -304,7 +305,13 @@ class CollaborationRegistry:
             branch = f"codex-agy/{session_id}/{spec.task_id}"
             workdir = session_root / spec.task_id
             self._worktrees.create(root, workdir, branch, base_ref)
-            records.append(_TaskRecord(spec=spec, workdir=workdir, branch=branch))
+            try:
+                from .acceptance import capture_baseline_snapshot
+
+                baseline = capture_baseline_snapshot(workdir, isolated_worktree=True)
+            except Exception:
+                baseline = None
+            records.append(_TaskRecord(spec=spec, workdir=workdir, branch=branch, baseline=baseline))
 
         session = _SessionRecord(
             session_id=session_id,
@@ -381,6 +388,8 @@ class CollaborationRegistry:
                 "verification": list(record.spec.verification),
                 "expected_mutation": record.spec.expected_mutation,
                 "acceptance_status": "manual",
+                "candidate_result": "CANDIDATE" if state == "completed" else "WORKER_RUNNING",
+                "supervisor_acceptance": "CANDIDATE_PENDING_REVIEW" if state == "completed" else "WORKER_RUNNING",
                 "worktree": worktree,
                 "scope_status": worktree.get("scope_status", "unknown"),
                 "scope_violations": worktree.get("scope_violations", []),
@@ -401,6 +410,22 @@ class CollaborationRegistry:
                 _path_in_scope(path, record.spec.owned_paths)
                 for path in changed_files
             )
+            if state == "completed" and record.baseline is not None:
+                try:
+                    from .acceptance import audit_candidate_scope
+
+                    candidate_audit = audit_candidate_scope(
+                        _task_contract_for_collaboration(record, session),
+                        record.workdir,
+                        record.baseline,
+                    )
+                    task_snapshot["candidate_scope_audit"] = candidate_audit.to_dict()
+                    if not candidate_audit.passed:
+                        task_snapshot["acceptance_status"] = "rejected_scope_violation"
+                        task_snapshot["supervisor_acceptance"] = "CANDIDATE_REJECTED"
+                except Exception as exc:
+                    task_snapshot["candidate_scope_audit"] = {"passed": False, "error": str(exc)}
+                    task_snapshot["acceptance_status"] = "candidate_pending_review"
             if record.spec.expected_mutation:
                 if state == "completed":
                     if has_in_scope_diff:
@@ -624,6 +649,29 @@ def _build_prompt(session: _SessionRecord, record: _TaskRecord) -> str:
         "Report changed files, tests, final status, and blockers when finished.",
     ]
     return "\n".join(lines)
+
+
+def _task_contract_for_collaboration(record: _TaskRecord, session: _SessionRecord) -> Any:
+    """Adapt the collaboration task contract for the shared acceptance audit."""
+    from .contracts import RiskClass, TaskContract
+
+    baseline = record.baseline
+    return TaskContract(
+        task_id=record.spec.task_id,
+        objective=record.spec.prompt,
+        base_head=session.base_commit,
+        workdir=str(record.workdir),
+        allowed_paths=list(record.spec.owned_paths),
+        forbidden_paths=list(record.spec.forbidden_paths),
+        acceptance_criteria=list(record.spec.acceptance),
+        verification_commands=list(record.spec.verification),
+        risk_class=RiskClass.CODE_CHANGES,
+        baseline_branch=getattr(baseline, "branch", None),
+        baseline_worktree_status=list(getattr(baseline, "worktree_status", ())),
+        baseline_tracked_diff=list(getattr(baseline, "tracked_diff", ())),
+        baseline_file_hashes=dict(getattr(baseline, "file_hashes", {})),
+        isolated_worktree=True,
+    )
 
 
 agy_collaborations = CollaborationRegistry()

@@ -11,7 +11,7 @@ from .contracts import RunState, TaskContract
 from .run_control import WorkerCallback, WorkerResult
 
 
-def _build_prompt(contract: TaskContract) -> str:
+def _build_prompt(contract: TaskContract, *, dangerously_skip_permissions: bool = False) -> str:
     """Preserve the validated contract as the single AGY execution payload."""
     payload: dict[str, Any] = {
         "task_id": contract.task_id,
@@ -26,6 +26,13 @@ def _build_prompt(contract: TaskContract) -> str:
         "risk_class": contract.risk_class.value,
         "max_repair_rounds": contract.max_repair_rounds,
         "auto_commit_policy": contract.auto_commit_policy.value,
+        "baseline_branch": contract.baseline_branch,
+        "baseline_worktree_status": contract.baseline_worktree_status,
+        "baseline_tracked_diff": contract.baseline_tracked_diff,
+        "per_wait_window": contract.per_wait_window,
+        "task_total_timeout": contract.task_total_timeout,
+        "isolated_worktree": contract.isolated_worktree,
+        "dangerously_skip_permissions": dangerously_skip_permissions,
     }
     return (
         "Execute this VNext TaskContract in the assigned worktree. "
@@ -62,7 +69,7 @@ def build_worker_callback(
     if not isinstance(contract, TaskContract):
         raise ValueError("contract must be a validated TaskContract")
 
-    prompt = _build_prompt(contract)
+    prompt = _build_prompt(contract, dangerously_skip_permissions=dangerously_skip_permissions)
 
     def _worker(context) -> WorkerResult:
         probes_count = 0
@@ -102,7 +109,15 @@ def build_worker_callback(
                 success=True,
                 output=result.text,
                 result_summary=result.text,
-                verification_result={"passed": True, "status": "passed", "returncode": 0},
+                verification_result={
+                    "passed": True,
+                    "status": "candidate",
+                    "returncode": 0,
+                    "candidate": True,
+                    "independent": False,
+                },
+                candidate=True,
+                terminal_reason="COMPLETED",
             )
         if is_quota_exhaustion(result.text, result.stderr):
             return WorkerResult(

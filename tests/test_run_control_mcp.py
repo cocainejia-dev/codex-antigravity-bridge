@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -203,15 +204,28 @@ def test_run_start_accepts_json_string_task(tmp_path: Path) -> None:
     assert data["state"] == "CREATED"
 
 
-def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path) -> None:
+def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path, monkeypatch) -> None:
     """Verify idempotency key re-returns existing record, while duplicate task_id raises DuplicateRunError."""
     db_file = tmp_path / "vnext_idempotency.sqlite3"
     task = _sample_task_dict(task_id="task-idem-01")
+    worker_entered = threading.Event()
+    release_worker = threading.Event()
+
+    def blocking_factory(contract, **kwargs):
+        def worker(context):
+            worker_entered.set()
+            release_worker.wait(timeout=2.0)
+            return WorkerResult(success=True, verification_result={"passed": True, "status": "passed"})
+
+        return worker
+
+    monkeypatch.setattr(server_module, "build_worker_callback", blocking_factory)
 
     # 1. Start with idempotency_key
     res1 = run_start(db_path=str(db_file), task=task, idempotency_key="idem-key-abc")
     data1 = json.loads(res1)
     run_id1 = data1["run_id"]
+    assert worker_entered.wait(timeout=1.0)
 
     # 2. Call again with same idempotency_key -> returns identical run
     res2 = run_start(db_path=str(db_file), task=task, idempotency_key="idem-key-abc")
@@ -222,6 +236,7 @@ def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path) -> None:
     # 3. Call with same task_id but different/no idempotency key -> DuplicateRunError
     with pytest.raises(DuplicateRunError):
         run_start(db_path=str(db_file), task=task, idempotency_key="different-key")
+    release_worker.set()
 
 
 def test_run_resume_preserves_same_run_and_rejects_duplicate(tmp_path: Path) -> None:

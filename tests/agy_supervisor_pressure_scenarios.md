@@ -57,3 +57,22 @@ correction, and final-stop after the correction budget or a scope change.
 Prompt the agent with an active asynchronous or durable run where `agy_wait` (or `run_wait`) returns `state="running"`, `is_terminal=False`, with no transport error and a healthy/fresh heartbeat.
 
 Expected with the skill: continue supervision (`CONTINUE_SUPERVISION=YES`), do not emit an assistant final response (`FINAL_RESPONSE=NO`), and do not launch a duplicate or replacement worker (`REPLACEMENT_WORKER=NO`). Re-enter bounded wait or observe until the worker reaches a genuine terminal state or hard worker timeout.
+# Acceptance hardening pressure cases
+
+The implementation contract treats every AGY terminal response as a candidate
+until the supervisor independently verifies it. These cases supplement the
+continuity scenarios below and are expected to remain regression coverage:
+
+- A UI candidate that changes `package.json` is rejected with the violating
+  diff retained, even if its own tests report PASS.
+- A clean isolated worktree may restore a worker-only forbidden tracked file to
+  its exact baseline, but the scope violation remains recorded and the
+  candidate is re-verified.
+- A baseline-dirty file touched by the worker is preserved and rejected; it is
+  never auto-restored.
+- A bounded wait expiry with a healthy heartbeat continues supervision and
+  does not start a replacement worker.
+- A hard timeout is a candidate review state. LOW risk requires independent
+  acceptance tests; MEDIUM/HIGH risk timed-out partials are rejected.
+- Two identical failure, diff, and blocker observations stop blind retry and
+  require a fresh diagnosis.
