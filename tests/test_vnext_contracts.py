@@ -48,11 +48,14 @@ def test_all_14_exact_run_states_exist() -> None:
 
 
 def test_risk_classes_and_auto_commit_policies() -> None:
-    expected_risks = {"READ_ONLY", "CODE_CHANGES", "DESTRUCTIVE", "PRODUCTION"}
+    expected_risks = {"LOW", "MEDIUM", "HIGH", "READ_ONLY", "CODE_CHANGES", "DESTRUCTIVE", "PRODUCTION"}
     assert {r.value for r in RiskClass} == expected_risks
 
     assert RiskClass.from_value("read_only") == RiskClass.READ_ONLY
     assert RiskClass.from_value("code-changes") == RiskClass.CODE_CHANGES
+    assert RiskClass.from_value("low") == RiskClass.LOW
+    assert RiskClass.from_value("medium") == RiskClass.MEDIUM
+    assert RiskClass.from_value("high") == RiskClass.HIGH
 
     expected_policies = {"NEVER", "VERIFIED_ONLY", "ALWAYS"}
     assert {p.value for p in AutoCommitPolicy} == expected_policies

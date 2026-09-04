@@ -32,6 +32,26 @@ the requested report fields. The copyable template, risk matrix, result state
 machine, lifecycle checklist, correction protocol, exact-run usage report contract,
 and pressure cases are in
 [`references/agy-supervisor-protocol.md`](references/agy-supervisor-protocol.md).
+
+AGY output is always a `CANDIDATE_RESULT`; worker completion, exit code zero,
+or worker-reported test success never means `ACCEPTED`. Freeze the TaskContract
+and capture the baseline before starting. After the worker reaches a terminal
+state, the supervisor independently audits changed files against
+`allowed_paths`/`forbidden_paths`, runs `git diff --check`, and executes the
+required verification and acceptance tests. Record `WORKER_RESULT` separately
+from `SUPERVISOR_ACCEPTANCE`.
+
+Out-of-scope changes are acceptance failures even when tests pass. Exact
+auto-restore is allowed only for a clean isolated worktree and a tracked file
+proven to be changed solely by the worker; preserve ambiguous or pre-existing
+dirty files and retain the scope-violation evidence.
+
+Hard timeouts enter candidate review, never success or automatic retry. LOW
+risk partials may be accepted only after complete independent verification;
+MEDIUM and HIGH risk partials are rejected by default, with HIGH risk never
+accepted after timeout. A healthy worker crossing a bounded wait window keeps
+running under the continuity contract. Two identical failure/diff/blocker
+observations stop blind retry and require fresh diagnosis.
 Parallel worktree plans live under `docs/agy-plans/` and start with
 `Status: READY_FOR_AGY`; create and validate the caller-owned AGY worktree,
 pass it as `workdir` to `agy_start` or `run_start`, and inspect `git worktree list` before and

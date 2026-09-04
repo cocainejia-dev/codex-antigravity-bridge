@@ -155,6 +155,11 @@ class WorkerResult:
     last_error: str | None = None
     suspended_reason: str | None = None
     target_state: RunState | None = None
+    # A result from an implementation worker is only a candidate until the
+    # supervisor independently audits scope and verification evidence.
+    candidate: bool = False
+    terminal_reason: str | None = None
+    acceptance_result: dict[str, Any] | None = None
 
 
 @dataclass
@@ -701,6 +706,30 @@ class DurableRunManager:
             raise ValueError(f"Expected TaskContract or dict, got {type(task).__name__}")
 
         contract.validate()
+        # Freeze the exact contract before persistence/spawn.  The worker and
+        # acceptance paths re-check this digest to detect in-flight mutation.
+        if not contract.is_frozen:
+            contract.freeze()
+        else:
+            contract.assert_immutable()
+
+        if not contract.baseline_file_hashes:
+            try:
+                from .acceptance import capture_baseline_snapshot
+
+                snapshot = capture_baseline_snapshot(
+                    worktree or contract.workdir,
+                    isolated_worktree=contract.isolated_worktree,
+                )
+                contract.baseline_branch = snapshot.branch
+                contract.baseline_worktree_status = list(snapshot.worktree_status)
+                contract.baseline_tracked_diff = list(snapshot.tracked_diff)
+                contract.baseline_file_hashes = dict(snapshot.file_hashes)
+                contract.freeze()
+            except Exception:
+                # A non-git or synthetic workdir can still use the legacy
+                # lifecycle; independent verification will fail closed later.
+                pass
 
         # Validate security against secrets
         try:
@@ -878,6 +907,7 @@ class DurableRunManager:
                 worker_t0 = time.monotonic()
                 worker_result = worker(ctx)
                 worker_dur = max(0.0, time.monotonic() - worker_t0)
+                contract.assert_immutable()
 
                 # Handle cancellation
                 if cancel_event.is_set():
@@ -939,6 +969,31 @@ class DurableRunManager:
                 current_version = latest.state_version
 
                 if worker_result.success:
+                    if worker_result.candidate:
+                        acceptance = self._accept_candidate(
+                            contract,
+                            worker_result,
+                            worktree=worktree or contract.workdir,
+                        )
+                        worker_result.acceptance_result = acceptance.to_dict()
+                        if not acceptance.task_accepted:
+                            self.store.transition_run(
+                                run_id,
+                                expected_version=current_version,
+                                target_state=RunState.VERIFYING,
+                                verification_result=acceptance.to_dict(),
+                            )
+                            self.store.transition_run(
+                                run_id,
+                                expected_version=current_version + 1,
+                                target_state=RunState.FAILED,
+                                result_summary=f"Candidate rejected: {acceptance.acceptance.value}",
+                                last_error="; ".join(acceptance.reasons) or "Candidate did not pass independent acceptance",
+                                verification_result=acceptance.to_dict(),
+                            )
+                            return
+                        # Preserve the independent acceptance payload below.
+                        worker_result.verification_result = acceptance.to_dict()
                     # Guarded transition: RUNNING -> VERIFYING -> COMPLETE (or COMMITTING -> COMPLETE)
                     verif_payload = worker_result.verification_result or {
                         "passed": True,
@@ -1044,6 +1099,44 @@ class DurableRunManager:
         thread = threading.Thread(target=_worker_runner, name=f"Worker-{record.run_id}", daemon=True)
         execution.thread = thread
         thread.start()
+
+    def _accept_candidate(
+        self,
+        contract: TaskContract,
+        worker_result: WorkerResult,
+        *,
+        worktree: str,
+    ):
+        """Run supervisor-owned verification for a candidate worker result."""
+        from .acceptance import (
+            BaselineSnapshot,
+            ScopeAudit,
+            WorkerTerminalReason,
+            audit_candidate_scope,
+            evaluate_candidate,
+        )
+
+        baseline = BaselineSnapshot(
+            head=contract.base_head,
+            branch=contract.baseline_branch,
+            worktree_status=tuple(contract.baseline_worktree_status),
+            tracked_diff=tuple(contract.baseline_tracked_diff),
+            file_hashes=dict(contract.baseline_file_hashes),
+            isolated_worktree=contract.isolated_worktree,
+        )
+        audit = audit_candidate_scope(contract, worktree, baseline)
+        independent = False
+        if contract.verification_commands:
+            from .verification import run_verification
+
+            evidence = run_verification(contract, worktree=worktree, run_id=f"{worker_result.result_summary or contract.task_id}-acceptance")
+            independent = bool(evidence.passed and evidence.scope_passed)
+        return evaluate_candidate(
+            worker_result=worker_result.terminal_reason or WorkerTerminalReason.COMPLETED,
+            scope_audit=audit,
+            independently_verified=independent,
+            risk_class=contract.risk_class,
+        )
 
     def run_status(self, run_id: str) -> RunRecord:
         """Fetch current durable state of a run."""

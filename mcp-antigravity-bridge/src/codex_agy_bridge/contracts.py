@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import json
+import hashlib
 import math
 from pathlib import Path, PurePosixPath
 import re
@@ -42,6 +43,9 @@ def _format_timestamp(val: str | datetime | float | int | None) -> str | None:
 class RiskClass(str, Enum):
     """Task risk classification."""
 
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
     READ_ONLY = "READ_ONLY"
     CODE_CHANGES = "CODE_CHANGES"
     DESTRUCTIVE = "DESTRUCTIVE"
@@ -58,6 +62,31 @@ class RiskClass(str, Enum):
             if member.value == norm or member.name == norm:
                 return member
         raise ValueError(f"Unknown risk class: {val!r}")
+
+
+class AcceptanceState(str, Enum):
+    """Explicit distinction between worker lifecycle and supervisor acceptance."""
+
+    WORKER_RUNNING = "WORKER_RUNNING"
+    WORKER_TERMINAL = "WORKER_TERMINAL"
+    CANDIDATE_PENDING_REVIEW = "CANDIDATE_PENDING_REVIEW"
+    CANDIDATE_REJECTED = "CANDIDATE_REJECTED"
+    CANDIDATE_REPAIR_REQUIRED = "CANDIDATE_REPAIR_REQUIRED"
+    ACCEPTED = "ACCEPTED"
+    FAILED = "FAILED"
+    HUMAN_DECISION_REQUIRED = "HUMAN_DECISION_REQUIRED"
+
+    @classmethod
+    def from_value(cls, val: str | "AcceptanceState") -> "AcceptanceState":
+        if isinstance(val, cls):
+            return val
+        if not isinstance(val, str):
+            raise ValueError(f"Invalid acceptance state type: {type(val).__name__}")
+        norm = val.strip().upper().replace("-", "_").replace(" ", "_")
+        for member in cls:
+            if member.value == norm or member.name == norm:
+                return member
+        raise ValueError(f"Unknown acceptance state: {val!r}")
 
 
 class AutoCommitPolicy(str, Enum):
@@ -298,6 +327,14 @@ class TaskContract:
     max_runtime: int | float = 1800
     max_repair_rounds: int = 2
     auto_commit_policy: AutoCommitPolicy = AutoCommitPolicy.VERIFIED_ONLY
+    baseline_branch: str | None = None
+    baseline_worktree_status: list[str] = field(default_factory=list)
+    baseline_tracked_diff: list[str] = field(default_factory=list)
+    baseline_file_hashes: dict[str, str] = field(default_factory=dict)
+    per_wait_window: float | None = None
+    task_total_timeout: float | None = None
+    isolated_worktree: bool = False
+    _frozen_digest: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.validate()
@@ -327,6 +364,32 @@ class TaskContract:
         self.risk_class = RiskClass.from_value(self.risk_class)
         self.auto_commit_policy = AutoCommitPolicy.from_value(self.auto_commit_policy)
 
+        if self.baseline_branch is not None:
+            if not isinstance(self.baseline_branch, str):
+                raise ValueError("baseline_branch must be a string or None")
+            self.baseline_branch = self.baseline_branch.strip() or None
+        self.baseline_worktree_status = [str(x) for x in self.baseline_worktree_status]
+        self.baseline_tracked_diff = normalize_paths(self.baseline_tracked_diff)
+        if not isinstance(self.baseline_file_hashes, dict):
+            raise ValueError("baseline_file_hashes must be a dictionary")
+        self.baseline_file_hashes = {
+            normalize_path(str(path)): str(value)
+            for path, value in self.baseline_file_hashes.items()
+        }
+        for field_name, value in (
+            ("per_wait_window", self.per_wait_window),
+            ("task_total_timeout", self.task_total_timeout),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{field_name} must be a positive finite number or None: {value!r}")
+        if not isinstance(self.isolated_worktree, bool):
+            raise ValueError("isolated_worktree must be a boolean")
+
         if (
             isinstance(self.max_runtime, bool)
             or not isinstance(self.max_runtime, (int, float))
@@ -351,6 +414,34 @@ class TaskContract:
         validate_no_credentials(self.acceptance_criteria, "acceptance_criteria")
         validate_no_credentials(self.verification_commands, "verification_commands")
         validate_no_credentials(self.dependencies, "dependencies")
+        validate_no_credentials(self.baseline_branch, "baseline_branch")
+        validate_no_credentials(self.baseline_worktree_status, "baseline_worktree_status")
+        validate_no_credentials(self.baseline_tracked_diff, "baseline_tracked_diff")
+        validate_no_credentials(self.baseline_file_hashes, "baseline_file_hashes")
+
+    def _canonical_payload(self) -> dict[str, Any]:
+        payload = self.to_dict()
+        return payload
+
+    def freeze(self) -> "TaskContract":
+        """Freeze the validated contract and record a tamper-evident digest."""
+        self.validate()
+        encoded = json.dumps(self._canonical_payload(), sort_keys=True, separators=(",", ":"))
+        self._frozen_digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return self
+
+    @property
+    def is_frozen(self) -> bool:
+        return self._frozen_digest is not None
+
+    def assert_immutable(self) -> None:
+        """Raise if a frozen contract was mutated after worker start."""
+        if self._frozen_digest is None:
+            return
+        encoded = json.dumps(self._canonical_payload(), sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        if digest != self._frozen_digest:
+            raise ValueError("TaskContract was mutated after it was frozen")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert TaskContract to a JSON-safe dictionary."""
@@ -368,6 +459,13 @@ class TaskContract:
             "max_runtime": self.max_runtime,
             "max_repair_rounds": self.max_repair_rounds,
             "auto_commit_policy": self.auto_commit_policy.value,
+            "baseline_branch": self.baseline_branch,
+            "baseline_worktree_status": list(self.baseline_worktree_status),
+            "baseline_tracked_diff": list(self.baseline_tracked_diff),
+            "baseline_file_hashes": dict(self.baseline_file_hashes),
+            "per_wait_window": self.per_wait_window,
+            "task_total_timeout": self.task_total_timeout,
+            "isolated_worktree": self.isolated_worktree,
         }
 
     @classmethod
@@ -391,6 +489,13 @@ class TaskContract:
             auto_commit_policy=AutoCommitPolicy.from_value(
                 data.get("auto_commit_policy", AutoCommitPolicy.VERIFIED_ONLY)
             ),
+            baseline_branch=data.get("baseline_branch"),
+            baseline_worktree_status=data.get("baseline_worktree_status", []),
+            baseline_tracked_diff=data.get("baseline_tracked_diff", []),
+            baseline_file_hashes=data.get("baseline_file_hashes", {}),
+            per_wait_window=data.get("per_wait_window"),
+            task_total_timeout=data.get("task_total_timeout"),
+            isolated_worktree=bool(data.get("isolated_worktree", False)),
         )
 
     def to_json(self, **kwargs: Any) -> str:
