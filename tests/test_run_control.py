@@ -640,3 +640,62 @@ def test_run_cancel_pre_execution_race_under_load(tmp_path: Path) -> None:
         result = manager.run_result(record.run_id)
         assert result.state == RunState.CANCELLED
         assert result.last_error == reason
+
+
+def test_run_verification_worktree_keyword_reproduces_original_typeerror(tmp_path: Path) -> None:
+    """Document the incident: the canonical API rejects the obsolete keyword."""
+    from codex_agy_bridge.verification import run_verification
+
+    contract = _create_sample_contract(task_id="task-worktree-keyword-contract", workdir=str(tmp_path))
+    with pytest.raises(TypeError, match="unexpected keyword argument 'worktree'"):
+        run_verification(contract, worktree=str(tmp_path))
+
+
+def test_candidate_reaches_independent_acceptance_with_workdir_wiring(tmp_path: Path) -> None:
+    """A durable candidate must reach real verification and acceptance evidence."""
+    import subprocess
+
+    repo = tmp_path / "candidate-repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "feature.py").write_text("baseline\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Run Control Tests"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+    base_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    db_file = tmp_path / "candidate-acceptance.sqlite3"
+    manager = DurableRunManager(db_file)
+    contract = _create_sample_contract(task_id="task-workdir-wiring-acceptance", workdir=str(repo))
+    contract.base_head = base_head
+    contract.allowed_paths = ["src/feature.py"]
+    contract.forbidden_paths = ["secrets.json"]
+    contract.verification_commands = [
+        "python -c \"from pathlib import Path; assert Path('src/feature.py').read_text() == 'candidate\\n'\""
+    ]
+
+    def candidate_worker(ctx: WorkerContext) -> WorkerResult:
+        (Path(ctx.worktree) / "src" / "feature.py").write_text("candidate\n", encoding="utf-8")
+        return WorkerResult(success=True, candidate=True, result_summary="candidate-present")
+
+    record = manager.run_start(contract, worker=candidate_worker, worktree=str(repo))
+    terminal = manager.run_wait(record.run_id, timeout=10.0)
+
+    assert terminal.state == RunState.COMPLETE
+    assert terminal.last_error is None
+    assert terminal.verification_result["acceptance"] == "ACCEPTED"
+    assert terminal.verification_result["task_accepted"] is True
+    assert terminal.verification_result["independently_verified"] is True
+    assert terminal.verification_result["scope_audit"]["passed"] is True
+
+    from codex_agy_bridge.verification import VerificationEvidence, run_verification
+
+    evidence = run_verification(contract, workdir=repo, run_id="run-workdir-wiring-evidence")
+    assert isinstance(evidence, VerificationEvidence)
+    assert evidence.passed is True
+    assert evidence.scope_passed is True
+    assert evidence.provenance_verified is True

@@ -1129,7 +1129,7 @@ class DurableRunManager:
         if contract.verification_commands:
             from .verification import run_verification
 
-            evidence = run_verification(contract, worktree=worktree, run_id=f"{worker_result.result_summary or contract.task_id}-acceptance")
+            evidence = run_verification(contract, workdir=worktree, run_id=f"{worker_result.result_summary or contract.task_id}-acceptance")
             independent = bool(evidence.passed and evidence.scope_passed)
         return evaluate_candidate(
             worker_result=worker_result.terminal_reason or WorkerTerminalReason.COMPLETED,
