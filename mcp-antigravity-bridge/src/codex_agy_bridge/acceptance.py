@@ -21,6 +21,13 @@ class WorkerTerminalReason(str, Enum):
     FAILED = "FAILED"
 
 
+BASELINE_GIT_TIMEOUT_SECONDS = 10.0
+
+
+class BaselinePreparationError(RuntimeError):
+    """Raised when a baseline Git probe cannot complete within its bound."""
+
+
 def effective_risk_class(value: RiskClass | str) -> RiskClass:
     """Map legacy contract labels onto the explicit LOW/MEDIUM/HIGH model."""
     risk = RiskClass.from_value(value)
@@ -158,11 +165,28 @@ class CandidateAcceptance:
 
 
 def _git(workdir: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=str(workdir), capture_output=True, text=True, check=False
-    )
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(workdir),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=BASELINE_GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        command = "git " + " ".join(args)
+        raise BaselinePreparationError(
+            f"BASELINE_GIT_TIMEOUT: {command} exceeded {BASELINE_GIT_TIMEOUT_SECONDS:.1f}s"
+        ) from exc
+    except OSError as exc:
+        command = "git " + " ".join(args)
+        raise BaselinePreparationError(f"BASELINE_GIT_EXECUTION_FAILED: {command}: {exc}") from exc
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout).strip() or f"git {args[0]} failed")
+        command = "git " + " ".join(args)
+        detail = (result.stderr or result.stdout).strip() or f"{command} failed"
+        raise RuntimeError(detail)
     return result.stdout
 
 

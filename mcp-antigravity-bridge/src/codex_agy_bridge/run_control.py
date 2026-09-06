@@ -713,6 +713,7 @@ class DurableRunManager:
         else:
             contract.assert_immutable()
 
+        baseline_error: str | None = None
         if not contract.baseline_file_hashes:
             try:
                 from .acceptance import capture_baseline_snapshot
@@ -726,10 +727,16 @@ class DurableRunManager:
                 contract.baseline_tracked_diff = list(snapshot.tracked_diff)
                 contract.baseline_file_hashes = dict(snapshot.file_hashes)
                 contract.freeze()
-            except Exception:
-                # A non-git or synthetic workdir can still use the legacy
-                # lifecycle; independent verification will fail closed later.
-                pass
+            except Exception as exc:
+                from .acceptance import BaselinePreparationError
+
+                if not isinstance(exc, BaselinePreparationError):
+                    # Preserve the legacy fallback for synthetic/non-Git workdirs.
+                    pass
+                else:
+                    baseline_error = (
+                        f"BASELINE_PREPARATION_FAILED: {type(exc).__name__}: {exc}"
+                    )
 
         # Validate security against secrets
         try:
@@ -806,6 +813,14 @@ class DurableRunManager:
             )
         except Exception:
             pass
+
+        if baseline_error is not None:
+            return self.store.transition_run(
+                persisted_record.run_id,
+                expected_version=persisted_record.state_version,
+                target_state=RunState.FAILED,
+                last_error=baseline_error,
+            )
 
         # 2. SPAWN: Background execution decoupled from API caller
         if auto_spawn and worker is not None:

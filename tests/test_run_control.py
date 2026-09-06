@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -15,6 +16,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import pytest
+from codex_agy_bridge import acceptance
 from codex_agy_bridge.contracts import (
     AutoCommitPolicy,
     RiskClass,
@@ -84,6 +86,52 @@ def test_sqlite_journal_schema_initialization(tmp_path: Path) -> None:
     stored_contract = manager.get_task_contract(record.run_id)
     assert stored_contract.task_id == contract.task_id
     assert stored_contract.objective == contract.objective
+
+
+def test_baseline_git_probe_is_bounded_and_detached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Baseline Git probes must not inherit MCP stdin or run without a deadline."""
+    seen: dict[str, Any] = {}
+
+    def stalled_run(*args: Any, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=10.0)
+
+    monkeypatch.setattr(acceptance.subprocess, "run", stalled_run)
+
+    with pytest.raises(acceptance.BaselinePreparationError, match="BASELINE_GIT_TIMEOUT"):
+        acceptance._git(tmp_path, "rev-parse", "HEAD")
+
+    assert seen["stdin"] is subprocess.DEVNULL
+    assert seen["timeout"] == acceptance.BASELINE_GIT_TIMEOUT_SECONDS
+
+
+def test_baseline_preparation_failure_is_persisted_without_worker_spawn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A preparation failure remains observable and cannot start a worker."""
+    monkeypatch.setattr(
+        acceptance,
+        "capture_baseline_snapshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            acceptance.BaselinePreparationError("BASELINE_GIT_TIMEOUT: rev-parse")
+        ),
+    )
+    calls: list[str] = []
+
+    def worker(_context: WorkerContext) -> WorkerResult:
+        calls.append("spawned")
+        return WorkerResult(success=True, candidate=True)
+
+    manager = DurableRunManager(tmp_path / "baseline-failure.sqlite3")
+    contract = _create_sample_contract(task_id="task-baseline-preparation-failure", workdir=str(tmp_path))
+    record = manager.run_start(contract, worker=worker, worktree=str(tmp_path))
+
+    assert record.state == RunState.FAILED
+    assert record.last_error.startswith("BASELINE_PREPARATION_FAILED: BaselinePreparationError:")
+    assert calls == []
+    persisted = manager.run_status(record.run_id)
+    assert persisted.state == RunState.FAILED
+    assert persisted.last_error == record.last_error
 
 
 def test_persist_before_spawn_ordering(tmp_path: Path) -> None:
