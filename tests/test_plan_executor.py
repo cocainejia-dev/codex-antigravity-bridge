@@ -132,3 +132,48 @@ def test_resume_reuses_exact_active_child(tmp_path: Path) -> None:
     result = restarted.wait("exec-resume", timeout=15)
     assert result.state == PlanExecutionState.COMPLETE
     assert started == ["task-1"]
+
+
+def test_permission_mode_is_persisted_and_bound_to_child(tmp_path: Path) -> None:
+    repo, head = _repo(tmp_path)
+    db = tmp_path / "plan-permissions.sqlite3"
+
+    def factory(contract):
+        def worker(_ctx):
+            target = {"t1": "a.txt", "t2": "b.txt", "t3": "c.txt"}[contract.task_id]
+            (repo / target).write_text("allowed", encoding="utf-8")
+            return WorkerResult(
+                success=True,
+                candidate=True,
+                verification_result={"passed": True},
+                result_summary="permission-mode",
+                terminal_reason="COMPLETED",
+            )
+
+        return worker
+
+    executor = PlanExecutor(
+        db,
+        worker_factory=factory,
+        dangerously_skip_permissions=True,
+    )
+    executor.start(
+        _plan(repo, head),
+        integration_worktree=str(repo),
+        initial_base_head=head,
+        execution_id="exec-permissions",
+    )
+    result = executor.wait("exec-permissions", timeout=15)
+    assert result.dangerously_skip_permissions is True
+    assert result.state == PlanExecutionState.COMPLETE
+
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        identity = json.loads(
+            conn.execute(
+                "SELECT worker_identity_json FROM runs WHERE run_id=?",
+                ("exec-permissions-t1-0",),
+            ).fetchone()[0]
+        )
+    assert identity["dangerously_skip_permissions"] is True
