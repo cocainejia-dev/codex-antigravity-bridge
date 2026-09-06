@@ -98,3 +98,37 @@ The candidate manifest is controller-generated from paths, hashes, lifecycle,
 scope, attribution, verification, and acceptance fields. It is stored inside
 the existing JSON verification payload so old RunRecords remain readable and
 no database migration is required.
+
+## Task Shaping V1 Scenarios
+
+These scenarios exercise the public `run_shape` planning surface. They are
+planning-only checks: no worker is started, no AGY call is made, and no
+repository or durable-run state is changed. Record the returned `plan_id`,
+`plan_digest`, validation object, task contracts, and the exact input used.
+
+- **A: upload/parse/judge/feedback split.** Parent objective contains four
+  independently verifiable objectives with explicit acceptance criteria and
+  disjoint owned paths. Expected: `SHAPING_REQUIRED=YES`, four tasks, 100%
+  objective and acceptance coverage, a valid DAG, frozen generated contracts,
+  and final integration verification preserved.
+- **B: single label rename pass-through.** Parent contains one small objective,
+  one acceptance criterion, one owned path, and one cheap verification command.
+  Expected: `SHAPING_REQUIRED=NO`, `TASK_COUNT=1`, unchanged objective and
+  acceptance contract, and `PLAN_VALID=YES`.
+- **C: UI plus auth isolation.** Parent contains UI and authentication
+  objectives with separate path ownership and mixed LOW/HIGH risk. Expected:
+  risk partition is reported, ownership is disjoint, the plan remains serial,
+  and no automatic parallel execution is implied.
+- **D: atomic parser producer/consumer.** Parser producer and consumer share
+  an artifact path. Expected: shared-path metadata and dependency ordering are
+  explicit, downstream `base_head_resolution` is
+  `AT_EXECUTION_TIME_FROM_LAST_ACCEPTED_STATE`, and the DAG remains valid.
+- **E: missing acceptance coverage.** Remove one parent acceptance criterion
+  from all task coverage declarations. Expected: `PLAN_VALID=NO`, incomplete
+  acceptance coverage, and no executable acceptance plan is emitted.
+- **F: T1 accepted, T2 failed, T3 blocked.** Model three serial tasks with
+  `T2` depending on `T1` and `T3` depending on `T2`. Expected: the plan
+  represents the dependency chain and per-task acceptance boundaries; it does
+  not claim runtime success, retry a failed task, or start a replacement
+  worker. Runtime outcome reconciliation remains the existing supervisor
+  responsibility.

@@ -37,6 +37,7 @@ from .run_control import (
 )
 from .timeout_diagnostics import evaluate_timeout_diagnostics
 from .recovery import RecoveryOrchestrator
+from .task_shaping import shape_task
 from .worker_binding import build_worker_callback
 
 _run_resume_lock = threading.Lock()
@@ -53,6 +54,7 @@ mcp = FastMCP(
         "use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
         "Codex reviews and merges branches manually; "
+        "use run_shape for pre-execution TaskPlan validation only; it never starts workers. "
         "use run_start, run_status, run_observe, run_wait, run_result, and run_cancel for VNext durable runs. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
@@ -322,6 +324,13 @@ def agy_collab_start(
 def agy_collab_status(session_id: str) -> str:
     """Return aggregated status for an MVP collaboration session."""
     return json.dumps(agy_collaborations.status(session_id), ensure_ascii=False)
+
+
+@mcp.tool()
+def run_shape(parent: dict[str, Any]) -> str:
+    """Shape and validate a structured parent goal without executing it."""
+    plan = shape_task(parent)
+    return json.dumps(plan.to_dict(), ensure_ascii=False)
 
 
 @mcp.tool()
