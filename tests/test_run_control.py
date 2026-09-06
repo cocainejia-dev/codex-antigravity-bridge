@@ -47,17 +47,23 @@ def _create_sample_contract(
     """Helper to create a valid TaskContract with temporary workdir."""
     if workdir is None:
         workdir = Path(os.getcwd()).as_posix()
+    base_head = kwargs.pop("base_head", "abcdef1234567890")
+    allowed_paths = kwargs.pop("allowed_paths", ["src/run_control.py"])
+    forbidden_paths = kwargs.pop("forbidden_paths", ["config/secrets.json"])
+    acceptance_criteria = kwargs.pop("acceptance_criteria", ["pytest passes"])
+    verification_commands = kwargs.pop("verification_commands", ["pytest -q"])
+    risk_class = kwargs.pop("risk_class", RiskClass.CODE_CHANGES)
     return TaskContract(
         task_id=task_id,
         objective=objective,
-        base_head="abcdef1234567890",
+        base_head=base_head,
         workdir=workdir,
-        allowed_paths=["src/run_control.py"],
-        forbidden_paths=["config/secrets.json"],
-        acceptance_criteria=["pytest passes"],
-        verification_commands=["pytest -q"],
+        allowed_paths=allowed_paths,
+        forbidden_paths=forbidden_paths,
+        acceptance_criteria=acceptance_criteria,
+        verification_commands=verification_commands,
         dependencies=[],
-        risk_class=RiskClass.CODE_CHANGES,
+        risk_class=risk_class,
         max_runtime=300,
         max_repair_rounds=2,
         auto_commit_policy=AutoCommitPolicy.VERIFIED_ONLY,
@@ -132,6 +138,75 @@ def test_baseline_preparation_failure_is_persisted_without_worker_spawn(
     persisted = manager.run_status(record.run_id)
     assert persisted.state == RunState.FAILED
     assert persisted.last_error == record.last_error
+
+
+def test_low_timeout_harvests_worktree_candidate_and_persists_manifest(tmp_path: Path) -> None:
+    repo = tmp_path / "harvest-repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Harvest Test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    contract = _create_sample_contract(
+        task_id="task-low-timeout-harvest",
+        workdir=str(repo),
+        base_head=head,
+        allowed_paths=["src/feature.py"],
+        forbidden_paths=["secrets.json"],
+        verification_commands=["python -c pass"],
+        risk_class=RiskClass.LOW,
+        isolated_worktree=True,
+    )
+    manager = DurableRunManager(tmp_path / "harvest.sqlite3")
+
+    def timed_out_worker(_ctx: WorkerContext) -> WorkerResult:
+        (repo / "src" / "feature.py").write_text("VALUE = 2\n", encoding="utf-8")
+        return WorkerResult(
+            success=False,
+            terminal_reason="HARD_TIMEOUT",
+            last_error="worker report unavailable after hard timeout",
+        )
+
+    record = manager.run_start(contract, worker=timed_out_worker, worktree=str(repo), repo=str(repo))
+    final = manager.run_wait(record.run_id, timeout=10)
+    assert final.state == RunState.COMPLETE
+    assert final.verification_result["candidate_manifest"]["candidate_source"] == "WORKTREE_HARVEST"
+    assert final.verification_result["candidate_manifest"]["worker_report_available"] is False
+    assert final.verification_result["candidate_manifest"]["worker_terminal_reason"] == "HARD_TIMEOUT"
+    assert final.verification_result["acceptance"]["accepted"] is True
+    reloaded = DurableRunManager(tmp_path / "harvest.sqlite3").run_status(record.run_id)
+    assert reloaded.verification_result["candidate_manifest"]["candidate_discovered"] is True
+
+
+def test_healthy_worker_wait_expiry_does_not_harvest_or_duplicate(tmp_path: Path) -> None:
+    manager = DurableRunManager(tmp_path / "healthy.sqlite3")
+    contract = _create_sample_contract(
+        task_id="task-healthy-wait-no-harvest",
+        workdir=str(tmp_path),
+        verification_commands=[],
+        isolated_worktree=False,
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def healthy_worker(_ctx: WorkerContext) -> WorkerResult:
+        started.set()
+        release.wait(timeout=2)
+        return WorkerResult(success=True, result_summary="healthy")
+
+    record = manager.run_start(contract, worker=healthy_worker, worktree=str(tmp_path))
+    assert started.wait(timeout=2)
+    waited = manager.run_wait(record.run_id, timeout=0.05, poll_interval=0.01)
+    observed = manager.run_observe(record.run_id)
+    assert waited.state == RunState.RUNNING
+    assert observed.is_alive is True
+    assert observed.state == RunState.RUNNING
+    assert manager.list_runs(task_id=contract.task_id)[0].run_id == record.run_id
+    release.set()
+    assert manager.run_wait(record.run_id, timeout=5).state == RunState.COMPLETE
 
 
 def test_persist_before_spawn_ordering(tmp_path: Path) -> None:

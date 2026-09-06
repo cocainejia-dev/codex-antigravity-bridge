@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
 import math
@@ -1045,6 +1045,16 @@ class DurableRunManager:
                     )
                 else:
                     # Failure or custom target state
+                    if worker_result.terminal_reason in ("HARD_TIMEOUT", "COMPLETED"):
+                        harvested = self._harvest_existing_candidate(
+                            latest,
+                            contract,
+                            worktree=worktree or contract.workdir,
+                            terminal_reason=worker_result.terminal_reason,
+                            worker_report_available=bool(worker_result.output or worker_result.result_summary),
+                        )
+                        if harvested:
+                            return
                     target = worker_result.target_state or RunState.FAILED
                     err_msg = worker_result.last_error or "Worker returned failure"
                     if target in (RunState.DECISION_REQUIRED, RunState.BLOCKED, RunState.ACCOUNT_SWITCH_REQUIRED):
@@ -1152,6 +1162,88 @@ class DurableRunManager:
             independently_verified=independent,
             risk_class=contract.risk_class,
         )
+
+    def _harvest_existing_candidate(
+        self,
+        record: RunRecord,
+        contract: TaskContract,
+        *,
+        worktree: str,
+        terminal_reason: str,
+        worker_report_available: bool,
+    ) -> bool:
+        """Reconcile a terminal worker with controller-owned worktree evidence."""
+        from .acceptance import harvest_candidate
+
+        try:
+            manifest, audit = harvest_candidate(
+                contract,
+                run_id=record.run_id,
+                worktree=worktree,
+                worker_terminal_reason=terminal_reason,
+                worker_report_available=worker_report_available,
+            )
+        except Exception:
+            return False
+        if not manifest.changed_files:
+            return False
+
+        harvested_result = WorkerResult(
+            success=True,
+            candidate=True,
+            terminal_reason=manifest.worker_terminal_reason,
+            result_summary="Controller-discovered worktree candidate",
+        )
+        acceptance = self._accept_candidate(contract, harvested_result, worktree=worktree)
+        if manifest.attribution_status != "PASS":
+            accepted = False
+            reason = "Candidate attribution did not pass"
+        else:
+            accepted = acceptance.task_accepted
+            reason = "; ".join(acceptance.reasons)
+        manifest = replace(
+            manifest,
+            verification_status="PASS" if acceptance.independently_verified else "FAIL",
+            acceptance_status="ACCEPTED" if accepted else "REJECTED",
+            acceptance_reason=reason or (
+                "INDEPENDENTLY_HARVESTED_AND_VERIFIED" if accepted else "Candidate rejected"
+            ),
+        )
+        payload = {
+            "candidate_manifest": manifest.to_dict(),
+            "acceptance": acceptance.to_dict(),
+            "worker_report_available": worker_report_available,
+        }
+        latest = self.store.get_run(record.run_id)
+        if latest is None or latest.state in TERMINAL_STATES:
+            return True
+        try:
+            verifying = self.store.transition_run(
+                record.run_id,
+                expected_version=latest.state_version,
+                target_state=RunState.VERIFYING,
+                verification_result=payload,
+            )
+            if accepted:
+                self.store.transition_run(
+                    record.run_id,
+                    expected_version=verifying.state_version,
+                    target_state=RunState.COMPLETE,
+                    verification_result=payload,
+                    result_summary="INDEPENDENTLY_HARVESTED_AND_VERIFIED",
+                )
+            else:
+                self.store.transition_run(
+                    record.run_id,
+                    expected_version=verifying.state_version,
+                    target_state=RunState.FAILED,
+                    verification_result=payload,
+                    result_summary="Harvested candidate rejected",
+                    last_error=manifest.acceptance_reason,
+                )
+            return True
+        except (InvalidStateTransitionError, ConcurrentModificationError):
+            return False
 
     def run_status(self, run_id: str) -> RunRecord:
         """Fetch current durable state of a run."""
@@ -1332,6 +1424,20 @@ class DurableRunManager:
         """Safely transition an orphaned active run to INTERRUPTED state."""
         if record.state in TERMINAL_STATES or record.state in (RunState.INTERRUPTED, RunState.RECOVERY_READY):
             return record
+
+        contract = self.store.get_task_contract(record.run_id)
+        if contract is not None:
+            terminal_reason = "HARD_TIMEOUT" if "timeout" in reason.lower() else "COMPLETED"
+            if self._harvest_existing_candidate(
+                record,
+                contract,
+                worktree=record.worktree or contract.workdir,
+                terminal_reason=terminal_reason,
+                worker_report_available=False,
+            ):
+                harvested_record = self.store.get_run(record.run_id)
+                if harvested_record is not None:
+                    return harvested_record
 
         curr = record
         if curr.state == RunState.CREATED:

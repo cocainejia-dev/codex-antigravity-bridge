@@ -9,6 +9,7 @@ from codex_agy_bridge.acceptance import (
     audit_candidate_scope,
     capture_baseline_snapshot,
     evaluate_candidate,
+    harvest_candidate,
     restore_safe_out_of_scope_files,
     should_stop_blind_retry,
 )
@@ -49,6 +50,7 @@ def _contract(repo: Path, baseline, *, risk: RiskClass = RiskClass.LOW) -> TaskC
         baseline_worktree_status=list(baseline.worktree_status),
         baseline_tracked_diff=list(baseline.tracked_diff),
         baseline_file_hashes=dict(baseline.file_hashes),
+        isolated_worktree=True,
     )
 
 
@@ -68,6 +70,43 @@ def test_allowed_candidate_requires_independent_verification(tmp_path: Path) -> 
     assert audit.passed
     assert accepted.task_accepted
     assert accepted.acceptance == AcceptanceState.ACCEPTED
+
+
+def test_worktree_harvest_creates_attributed_manifest_without_worker_report(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    contract = _contract(repo, baseline)
+    (repo / "src" / "ui.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    manifest, audit = harvest_candidate(
+        contract,
+        run_id="run-harvest-1",
+        worktree=str(repo),
+        worker_terminal_reason=WorkerTerminalReason.HARD_TIMEOUT,
+        worker_report_available=False,
+    )
+
+    assert manifest.candidate_source == "WORKTREE_HARVEST"
+    assert manifest.worker_report_available is False
+    assert manifest.changed_files == ("src/ui.py",)
+    assert manifest.attribution_status == "PASS"
+    assert audit.passed
+    assert manifest.diff_sha256
+
+
+def test_worktree_harvest_no_diff_is_not_a_candidate(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    manifest, audit = harvest_candidate(
+        _contract(repo, baseline),
+        run_id="run-harvest-empty",
+        worktree=str(repo),
+        worker_terminal_reason=WorkerTerminalReason.COMPLETED,
+    )
+    assert manifest.changed_files == ()
+    assert manifest.candidate_discovered is False
+    assert manifest.candidate_source == "WORKTREE_HARVEST"
+    assert audit.passed
 
 
 def test_package_json_regression_is_rejected_and_evidence_retained(tmp_path: Path) -> None:

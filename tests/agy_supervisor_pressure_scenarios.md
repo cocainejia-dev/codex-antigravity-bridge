@@ -76,3 +76,25 @@ continuity scenarios below and are expected to remain regression coverage:
   acceptance tests; MEDIUM/HIGH risk timed-out partials are rejected.
 - Two identical failure, diff, and blocker observations stop blind retry and
   require a fresh diagnosis.
+
+## Candidate Harvesting V2
+
+- **A: lost final report**: a completed LOW-risk worker leaves only an allowed
+  file diff. Expected: `WORKTREE_HARVEST`, attribution and independent
+  verification pass, normal acceptance.
+- **B: LOW timeout partial**: the worker is gone after a useful allowed diff.
+  Expected: preserve `HARD_TIMEOUT`, harvest the manifest, and accept only after
+  all independent gates pass.
+- **C: MEDIUM timeout partial**: a valid diff and passing tests remain preserved,
+  but acceptance is rejected by risk policy.
+- **D: HIGH timeout partial**: preserve bounded forensic evidence and reject;
+  never auto-accept.
+- **E: caller disconnect while healthy**: reconcile the exact run first.
+  Expected: no harvest/finalization, no replacement worker, duplicate count 0.
+- **F: dirty baseline overlap**: a pre-existing dirty file is modified by the
+  worker. Expected: attribution ambiguous, no auto-restore, no auto-acceptance.
+
+The candidate manifest is controller-generated from paths, hashes, lifecycle,
+scope, attribution, verification, and acceptance fields. It is stored inside
+the existing JSON verification payload so old RunRecords remain readable and
+no database migration is required.
