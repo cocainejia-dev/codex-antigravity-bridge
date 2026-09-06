@@ -151,6 +151,7 @@ class PlanExecutionRecord:
     terminal_reason: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    dangerously_skip_permissions: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,6 +172,7 @@ class PlanExecutionRecord:
             "terminal_reason": self.terminal_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "dangerously_skip_permissions": self.dangerously_skip_permissions,
         }
 
 
@@ -257,10 +259,15 @@ class PlanExecutor:
         db_path: str | Path,
         *,
         worker_factory: Callable[[TaskContract], WorkerCallback] | None = None,
+        dangerously_skip_permissions: bool = False,
     ) -> None:
         self.store = PlanExecutionStore(db_path)
+        self.dangerously_skip_permissions = bool(dangerously_skip_permissions)
         self.worker_factory = worker_factory or (
-            lambda contract: build_worker_callback(contract)
+            lambda contract: build_worker_callback(
+                contract,
+                dangerously_skip_permissions=self.dangerously_skip_permissions,
+            )
         )
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.RLock()
@@ -319,6 +326,7 @@ class PlanExecutor:
             plan.to_dict(),
             created_at=now,
             updated_at=now,
+            dangerously_skip_permissions=self.dangerously_skip_permissions,
         )
         record = self.store.create(record, idempotency_key)
         self._launch(record.plan_execution_id)
@@ -343,6 +351,7 @@ class PlanExecutor:
         if record is None:
             raise KeyError(execution_id)
         if record.state not in TERMINAL_PLAN_STATES:
+            self.dangerously_skip_permissions = bool(record.dangerously_skip_permissions)
             self._launch(execution_id)
         return record
 
@@ -494,6 +503,9 @@ class PlanExecutor:
                 contract,
                 run_id=child_id,
                 worker=self.worker_factory(contract),
+                worker_identity={
+                    "dangerously_skip_permissions": self.dangerously_skip_permissions,
+                },
                 worktree=record.integration_worktree,
                 repo=record.integration_worktree,
                 base_head=record.current_accepted_head,

@@ -335,8 +335,15 @@ def run_shape(parent: dict[str, Any]) -> str:
     return json.dumps(plan.to_dict(), ensure_ascii=False)
 
 
-def _plan_executor(db_path: str) -> PlanExecutor:
-    return PlanExecutor(_validate_db_path(db_path))
+def _plan_executor(
+    db_path: str,
+    *,
+    dangerously_skip_permissions: bool = False,
+) -> PlanExecutor:
+    return PlanExecutor(
+        _validate_db_path(db_path),
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
 
 
 @mcp.tool()
@@ -348,9 +355,13 @@ def plan_start(
     idempotency_key: str | None = None,
     plan_execution_id: str | None = None,
     allow_high_risk_tasks: bool = False,
+    dangerously_skip_permissions: bool = False,
 ) -> str:
     """Persist a frozen TaskPlan and asynchronously execute it serially."""
-    executor = _plan_executor(db_path)
+    executor = _plan_executor(
+        db_path,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
     record = executor.start(task_plan, integration_worktree=integration_worktree, initial_base_head=initial_base_head, idempotency_key=idempotency_key, execution_id=plan_execution_id, allow_high_risk_tasks=allow_high_risk_tasks)
     return json.dumps(record.to_dict(), ensure_ascii=False)
 
