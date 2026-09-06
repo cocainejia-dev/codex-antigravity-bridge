@@ -132,3 +132,23 @@ repository or durable-run state is changed. Record the returned `plan_id`,
   not claim runtime success, retry a failed task, or start a replacement
   worker. Runtime outcome reconciliation remains the existing supervisor
   responsibility.
+
+## Plan Executor V1 Scenarios
+
+- **A: normal serial plan.** T1 -> T2 -> T3 produces three deterministic child
+  run IDs, three accepted local checkpoints, final verification, and COMPLETE.
+- **B: child failure.** T1 is preserved, T2 fails, T3 is BLOCKED; T1 is never
+  replayed and no replacement child is created.
+- **C: lost report.** Existing Candidate Harvesting V2 acceptance is the only
+  signal that advances the plan; a harvested but rejected candidate cannot
+  create a checkpoint.
+- **D: healthy long run.** Repeated bounded `plan_wait` expiry leaves the child
+  RUNNING and healthy; no replacement worker is started.
+- **E: Codex/MCP restart.** `plan_resume` reconciles the exact persisted child
+  run ID and does not create a second child.
+- **F: crash after acceptance.** Resume detects an existing checkpoint or
+  creates exactly one deterministic checkpoint before advancing.
+- **G: final verification failure.** Accepted checkpoints remain preserved and
+  the plan is BLOCKED/FAILED rather than silently completed.
+- **H: high-risk barrier.** A HIGH task without explicit authorization remains
+  blocked before child launch.
