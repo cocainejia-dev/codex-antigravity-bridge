@@ -38,6 +38,7 @@ from .run_control import (
 from .timeout_diagnostics import evaluate_timeout_diagnostics
 from .recovery import RecoveryOrchestrator
 from .task_shaping import shape_task
+from .plan_executor import PlanExecutor
 from .worker_binding import build_worker_callback
 
 _run_resume_lock = threading.Lock()
@@ -55,6 +56,7 @@ mcp = FastMCP(
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
         "Codex reviews and merges branches manually; "
         "use run_shape for pre-execution TaskPlan validation only; it never starts workers. "
+        "use plan_start, plan_status, plan_wait, plan_result, plan_cancel, and plan_resume for durable serial TaskPlan execution. "
         "use run_start, run_status, run_observe, run_wait, run_result, and run_cancel for VNext durable runs. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
@@ -331,6 +333,51 @@ def run_shape(parent: dict[str, Any]) -> str:
     """Shape and validate a structured parent goal without executing it."""
     plan = shape_task(parent)
     return json.dumps(plan.to_dict(), ensure_ascii=False)
+
+
+def _plan_executor(db_path: str) -> PlanExecutor:
+    return PlanExecutor(_validate_db_path(db_path))
+
+
+@mcp.tool()
+def plan_start(
+    db_path: str,
+    task_plan: dict[str, Any],
+    integration_worktree: str,
+    initial_base_head: str,
+    idempotency_key: str | None = None,
+    plan_execution_id: str | None = None,
+    allow_high_risk_tasks: bool = False,
+) -> str:
+    """Persist a frozen TaskPlan and asynchronously execute it serially."""
+    executor = _plan_executor(db_path)
+    record = executor.start(task_plan, integration_worktree=integration_worktree, initial_base_head=initial_base_head, idempotency_key=idempotency_key, execution_id=plan_execution_id, allow_high_risk_tasks=allow_high_risk_tasks)
+    return json.dumps(record.to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def plan_status(db_path: str, plan_execution_id: str) -> str:
+    return json.dumps(_plan_executor(db_path).status(plan_execution_id).to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def plan_wait(db_path: str, plan_execution_id: str, timeout: float = 30.0) -> str:
+    return json.dumps(_plan_executor(db_path).wait(plan_execution_id, timeout=timeout).to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def plan_result(db_path: str, plan_execution_id: str) -> str:
+    return json.dumps(_plan_executor(db_path).result(plan_execution_id).to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def plan_cancel(db_path: str, plan_execution_id: str) -> str:
+    return json.dumps(_plan_executor(db_path).cancel(plan_execution_id).to_dict(), ensure_ascii=False)
+
+
+@mcp.tool()
+def plan_resume(db_path: str, plan_execution_id: str) -> str:
+    return json.dumps(_plan_executor(db_path).resume(plan_execution_id).to_dict(), ensure_ascii=False)
 
 
 @mcp.tool()
