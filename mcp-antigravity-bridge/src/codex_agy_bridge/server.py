@@ -497,6 +497,29 @@ def run_result(
     manager = DurableRunManager(valid_db_path)
     record = manager.run_result(run_id.strip())
     payload = record.to_dict()
+    verification = record.verification_result if isinstance(record.verification_result, dict) else {}
+    manifest = verification.get("candidate_manifest")
+    if isinstance(manifest, dict):
+        payload["candidate_manifest"] = manifest
+        for field_name in (
+            "worker_terminal_reason",
+            "worker_report_available",
+            "candidate_source",
+            "candidate_discovered",
+            "changed_files",
+            "out_of_scope_files",
+            "baseline_overlap_files",
+            "attribution_status",
+            "scope_status",
+            "verification_status",
+            "acceptance_status",
+            "acceptance_reason",
+            "diff_sha256",
+        ):
+            payload[field_name] = manifest.get(field_name)
+        acceptance = verification.get("acceptance")
+        if isinstance(acceptance, dict):
+            payload["supervisor_acceptance"] = acceptance.get("acceptance")
 
     try:
         from .telemetry_hooks import get_telemetry_ledger, telemetry_path_for

@@ -136,6 +136,141 @@ class ScopeAudit:
 
 
 @dataclass(frozen=True)
+class CandidateManifest:
+    """Controller-owned, bounded evidence for a harvested worktree candidate."""
+
+    candidate_id: str
+    run_id: str
+    task_id: str
+    candidate_source: str
+    discovered_at: str
+    worker_terminal_reason: str
+    worker_report_available: bool
+    baseline_head: str
+    contract_digest: str | None
+    worktree: str
+    isolated_worktree: bool
+    changed_files: tuple[str, ...] = ()
+    out_of_scope_files: tuple[str, ...] = ()
+    forbidden_files: tuple[str, ...] = ()
+    baseline_overlap_files: tuple[str, ...] = ()
+    diff_sha256: str = ""
+    candidate_file_hashes: dict[str, str] = field(default_factory=dict)
+    candidate_discovered: bool = False
+    attribution_status: str = "INSUFFICIENT"
+    scope_status: str = "UNCHECKED"
+    verification_status: str = "UNCHECKED"
+    acceptance_status: str = "PENDING"
+    acceptance_reason: str = ""
+    risk_class: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "run_id": self.run_id,
+            "task_id": self.task_id,
+            "candidate_source": self.candidate_source,
+            "discovered_at": self.discovered_at,
+            "worker_terminal_reason": self.worker_terminal_reason,
+            "worker_report_available": self.worker_report_available,
+            "baseline_head": self.baseline_head,
+            "contract_digest": self.contract_digest,
+            "worktree": self.worktree,
+            "isolated_worktree": self.isolated_worktree,
+            "changed_files": list(self.changed_files),
+            "out_of_scope_files": list(self.out_of_scope_files),
+            "forbidden_files": list(self.forbidden_files),
+            "baseline_overlap_files": list(self.baseline_overlap_files),
+            "diff_sha256": self.diff_sha256,
+            "candidate_file_hashes": dict(self.candidate_file_hashes),
+            "candidate_discovered": self.candidate_discovered,
+            "attribution_status": self.attribution_status,
+            "scope_status": self.scope_status,
+            "verification_status": self.verification_status,
+            "acceptance_status": self.acceptance_status,
+            "acceptance_reason": self.acceptance_reason,
+            "risk_class": self.risk_class,
+        }
+
+
+def harvest_candidate(
+    contract: TaskContract,
+    *,
+    run_id: str,
+    worktree: str,
+    worker_terminal_reason: WorkerTerminalReason | str,
+    worker_report_available: bool = False,
+) -> tuple[CandidateManifest, ScopeAudit]:
+    """Discover bounded worktree evidence without granting acceptance."""
+    root = Path(worktree).expanduser().resolve()
+    baseline = BaselineSnapshot(
+        head=contract.base_head,
+        branch=contract.baseline_branch,
+        worktree_status=tuple(contract.baseline_worktree_status),
+        tracked_diff=tuple(contract.baseline_tracked_diff),
+        file_hashes=dict(contract.baseline_file_hashes),
+        isolated_worktree=contract.isolated_worktree,
+    )
+    audit = audit_candidate_scope(contract, root, baseline)
+    current_hashes: dict[str, str] = {}
+    for path in audit.changed_files:
+        candidate = root / path
+        if candidate.is_file():
+            try:
+                current_hashes[path] = _hash_file(candidate)
+            except OSError:
+                continue
+    digest_input = "\n".join(
+        [
+            *sorted(f"{path}:{current_hashes.get(path, '')}" for path in audit.changed_files),
+            baseline.head,
+            contract._frozen_digest or "",
+        ]
+    )
+    diff_sha256 = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
+    actual_head = ""
+    try:
+        actual_head = _git(root, "rev-parse", "HEAD").strip()
+    except RuntimeError:
+        pass
+    attributed = bool(
+        audit.changed_files
+        and contract.isolated_worktree
+        and bool(contract.base_head)
+        and actual_head == baseline.head
+        and not audit.baseline_overlap_files
+        and root == Path(contract.workdir).expanduser().resolve()
+    )
+    attribution = "PASS" if attributed else ("AMBIGUOUS" if audit.baseline_overlap_files else "INSUFFICIENT")
+    return (
+        CandidateManifest(
+            candidate_id=f"candidate-{run_id}",
+            run_id=run_id,
+            task_id=contract.task_id,
+            candidate_source="WORKTREE_HARVEST",
+            discovered_at=datetime.now(timezone.utc).isoformat(),
+            worker_terminal_reason=WorkerTerminalReason(worker_terminal_reason).value,
+            worker_report_available=worker_report_available,
+            baseline_head=baseline.head,
+            contract_digest=contract._frozen_digest,
+            worktree=str(root),
+            isolated_worktree=contract.isolated_worktree,
+            changed_files=audit.changed_files,
+            out_of_scope_files=audit.out_of_scope_files,
+            forbidden_files=audit.forbidden_files,
+            baseline_overlap_files=audit.baseline_overlap_files,
+            diff_sha256=diff_sha256,
+            candidate_file_hashes=current_hashes,
+            candidate_discovered=bool(audit.changed_files),
+            attribution_status=attribution,
+            scope_status="PASS" if audit.passed else "FAIL",
+            risk_class=effective_risk_class(contract.risk_class).value,
+        ),
+        audit,
+    )
+
+
+@dataclass(frozen=True)
 class CandidateAcceptance:
     """Result of independent supervisor acceptance of a worker candidate."""
 
