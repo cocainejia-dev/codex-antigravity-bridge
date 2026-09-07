@@ -44,8 +44,11 @@ def _run(db_path: str, run_id: str) -> int:
     identity = None
     while time.monotonic() < deadline:
         identity = manager.store.get_worker_identity(run_id)
-        if identity and identity.get("pid") == os.getpid() and identity.get("launch_state") == "SPAWNED":
-            break
+        if identity and identity.get("launch_state") == "SPAWNED":
+            reservation_pid = identity.get("reservation_pid", identity.get("pid"))
+            if manager.store.claim_worker_host(run_id, reservation_pid, os.getpid()):
+                identity = manager.store.get_worker_identity(run_id)
+                break
         time.sleep(0.02)
     else:
         record = manager.store.get_run(run_id)

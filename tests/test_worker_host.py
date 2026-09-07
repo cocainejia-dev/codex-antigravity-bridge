@@ -63,6 +63,23 @@ def test_external_start_never_replays_an_active_run(tmp_path: Path, monkeypatch:
     assert len(starts) == 1
 
 
+def test_worker_host_claim_replaces_launcher_pid_atomically(tmp_path: Path) -> None:
+    manager = DurableRunManager(tmp_path / "claim.sqlite3")
+    record = manager.run_start(_contract(tmp_path), run_id="claim-run", launch_mode="external_durable", auto_spawn=False)
+    identity = manager.store.get_worker_identity(record.run_id) or {}
+    identity.update({"pid": 1001, "worker_host_pid": 1001, "reservation_pid": 1001, "launch_state": "SPAWNED"})
+    manager.store.update_worker_identity(record.run_id, identity)
+    assert manager.store.update_worker_pid(record.run_id, 1001).pid == 1001
+    assert manager.store.claim_worker_host(record.run_id, 1001, 2002) is True
+    claimed = manager.store.get_worker_identity(record.run_id)
+    assert claimed is not None
+    assert claimed["pid"] == 2002
+    assert claimed["reservation_pid"] == 1001
+    assert claimed["launch_state"] == "ACTIVE"
+    assert manager.store.get_run(record.run_id).pid == 2002
+    assert manager.store.claim_worker_host(record.run_id, 1001, 3003) is False
+
+
 @pytest.mark.skipif(os.name != "nt", reason="covers the Windows detached-process boundary")
 def test_windows_detached_worker_survives_parent_exit(tmp_path: Path) -> None:
     """Exercise the OS boundary independently of AGY or mocked PID probes."""
