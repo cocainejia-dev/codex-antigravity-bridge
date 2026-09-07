@@ -18,6 +18,7 @@ class WorkerTerminalReason(str, Enum):
 
     COMPLETED = "COMPLETED"
     HARD_TIMEOUT = "HARD_TIMEOUT"
+    INTERRUPTED = "INTERRUPTED"
     FAILED = "FAILED"
 
 
@@ -512,6 +513,20 @@ def evaluate_candidate(
             return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_REJECTED, False, risk.value, scope_audit, independently_verified, ("Timed-out partials require rejection for this risk class",))
         if not independently_verified:
             return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_PENDING_REVIEW, False, risk.value, scope_audit, False, ("Timed-out partial requires independent verification",))
+    if terminal == WorkerTerminalReason.INTERRUPTED:
+        if risk in {RiskClass.HIGH, RiskClass.DESTRUCTIVE, RiskClass.PRODUCTION, RiskClass.MEDIUM}:
+            return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_REJECTED, False, risk.value, scope_audit, independently_verified, ("Interrupted partials require rejection for this risk class",))
+        if not independently_verified:
+            return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_PENDING_REVIEW, False, risk.value, scope_audit, False, ("Interrupted partial requires independent verification",))
+        return CandidateAcceptance(
+            terminal,
+            AcceptanceState.ACCEPTED,
+            True,
+            risk.value,
+            scope_audit,
+            True,
+            ("ACCEPTED_AFTER_INDEPENDENT_INTERRUPTION_RECONCILIATION",),
+        )
     if not independently_verified:
         return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_PENDING_REVIEW, False, risk.value, scope_audit, False, ("Worker output is a candidate, not independent acceptance",))
     return CandidateAcceptance(terminal, AcceptanceState.ACCEPTED, True, risk.value, scope_audit, True, ())

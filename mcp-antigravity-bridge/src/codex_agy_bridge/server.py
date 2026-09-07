@@ -408,8 +408,9 @@ def run_start(
     """Start a durable run tracking a VNext TaskContract specification.
 
     Persists an initial CREATED RunRecord into the caller-specified db_path.
-    Auto_spawn is false by default because MCP JSON cannot carry Python callbacks;
-    execution wiring is internal.
+    Production MCP calls launch an external durable worker host.  The frozen
+    TaskContract is the worker's durable input; injected Python callbacks are
+    reserved for deterministic tests.
     """
     return _run_start_impl(
         db_path=db_path,
@@ -442,8 +443,6 @@ def _run_start_impl(
     worker_factory=None,
 ) -> str:
     """Internal run-start seam; callable values never enter the public MCP schema."""
-    if worker_factory is None:
-        worker_factory = build_worker_callback
     valid_db_path = _validate_db_path(db_path)
     if isinstance(task, str):
         try:
@@ -454,27 +453,44 @@ def _run_start_impl(
         raise ValueError("task must be a dictionary representing a TaskContract")
 
     contract = TaskContract.from_dict(task)
-    if dangerously_skip_permissions:
-        worker = worker_factory(contract, dangerously_skip_permissions=True)
-    else:
-        worker = worker_factory(contract)
     worker_identity = {
         "dangerously_skip_permissions": bool(dangerously_skip_permissions),
     }
     manager = DurableRunManager(valid_db_path)
-    record = manager.run_start(
-        contract,
-        idempotency_key=idempotency_key or None,
-        worker=worker,
-        run_id=run_id or None,
-        auto_spawn=True,
-        worktree=worktree or None,
-        repo=repo or None,
-        base_head=base_head or None,
-        attempt=attempt,
-        repair_round=repair_round,
-        worker_identity=worker_identity,
-    )
+    if worker_factory is None:
+        # Public MCP production calls use the detached worker host.  The
+        # frozen contract is already persisted by run_start; no prompt or
+        # secret is placed in argv.
+        record = manager.run_start(
+            contract,
+            idempotency_key=idempotency_key or None,
+            worker=None,
+            run_id=run_id or None,
+            auto_spawn=True,
+            launch_mode="external_durable",
+            worktree=worktree or None,
+            repo=repo or None,
+            base_head=base_head or None,
+            attempt=attempt,
+            repair_round=repair_round,
+            worker_identity=worker_identity,
+        )
+    else:
+        worker = worker_factory(contract, dangerously_skip_permissions=True) if dangerously_skip_permissions else worker_factory(contract)
+        record = manager.run_start(
+            contract,
+            idempotency_key=idempotency_key or None,
+            worker=worker,
+            run_id=run_id or None,
+            auto_spawn=True,
+            launch_mode="in_process",
+            worktree=worktree or None,
+            repo=repo or None,
+            base_head=base_head or None,
+            attempt=attempt,
+            repair_round=repair_round,
+            worker_identity=worker_identity,
+        )
     return json.dumps(record.to_dict(), ensure_ascii=False)
 
 

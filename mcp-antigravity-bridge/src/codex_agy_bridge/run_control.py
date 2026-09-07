@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -131,7 +132,7 @@ def _is_in_process_worker(record: RunRecord, worker_identity: dict[str, Any] | N
     """Determine whether a run's worker execution is an in-process thread or external process."""
     if worker_identity:
         wtype = str(worker_identity.get("worker_type") or worker_identity.get("type") or "").strip().lower()
-        if wtype in ("process", "subprocess", "external", "supervised_process"):
+        if wtype in ("process", "subprocess", "external", "supervised_process", "external_durable", "durable_worker_host"):
             return False
         if wtype == "queued":
             return False
@@ -140,6 +141,18 @@ def _is_in_process_worker(record: RunRecord, worker_identity: dict[str, Any] | N
     if record.pid is not None and record.pid != os.getpid():
         return False
     return True
+
+
+def _runtime_provenance_sha() -> str:
+    """Return a stable hash for the installed bridge runtime source."""
+    configured = os.environ.get("CODEX_AGY_RUNTIME_SHA")
+    if configured and configured.strip():
+        return configured.strip()
+    try:
+        source = Path(__file__).resolve()
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except OSError:
+        return "UNKNOWN"
 
 
 @dataclass
@@ -432,6 +445,42 @@ class DurableRunStore:
             finally:
                 conn.close()
 
+    def update_worker_identity(self, run_id: str, identity: dict[str, Any]) -> None:
+        """Atomically replace the redacted durable worker identity metadata."""
+        validate_no_credentials(identity, "worker_identity")
+        payload = json.dumps(identity, sort_keys=True)
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute(
+                    "UPDATE runs SET worker_identity_json=?, updated_at=? WHERE run_id=?",
+                    (payload, _utc_now_iso(), run_id),
+                )
+                if cur.rowcount == 0:
+                    raise RunNotFoundError(f"Run {run_id} not found")
+            finally:
+                conn.close()
+
+    def update_worker_pid(self, run_id: str, pid: int) -> RunRecord:
+        """Persist the external worker host PID before it transitions to RUNNING."""
+        if not isinstance(pid, int) or pid <= 0:
+            raise ValueError("pid must be a positive integer")
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute(
+                    "UPDATE runs SET pid=?, updated_at=? WHERE run_id=?",
+                    (pid, _utc_now_iso(), run_id),
+                )
+                if cur.rowcount == 0:
+                    raise RunNotFoundError(f"Run {run_id} not found")
+            finally:
+                conn.close()
+        record = self.get_run(run_id)
+        if record is None:
+            raise RunNotFoundError(f"Run {run_id} not found")
+        return record
+
     def get_active_run_by_task_id(self, task_id: str) -> RunRecord | None:
         """Fetch an active (non-terminal) run for a task_id if one exists."""
         terminal_values = [s.value for s in TERMINAL_STATES]
@@ -696,6 +745,7 @@ class DurableRunManager:
         repair_round: int = 0,
         run_id: str | None = None,
         auto_spawn: bool = True,
+        launch_mode: str | None = None,
     ) -> RunRecord:
         """Start a new durable run with persist-before-spawn ordering and idempotency protection."""
         if isinstance(task, dict):
@@ -762,9 +812,22 @@ class DurableRunManager:
             )
 
         # Determine and validate worker execution identity
+        if launch_mode is None:
+            # A non-spawning manager call remains the legacy/injected mode;
+            # production callers opt into the detached host explicitly.
+            launch_mode = "in_process" if worker is not None or not auto_spawn else "external_durable"
+        launch_mode = str(launch_mode).strip().lower()
+        if launch_mode not in {"in_process", "external_durable"}:
+            raise ValueError("launch_mode must be in_process or external_durable")
+        if launch_mode == "external_durable" and worker is not None:
+            raise ValueError("external_durable launch cannot accept an injected callback")
+
         resolved_worker_identity = dict(worker_identity) if worker_identity is not None else {}
         if "worker_type" not in resolved_worker_identity and "type" not in resolved_worker_identity:
-            if worker is not None or auto_spawn:
+            if launch_mode == "external_durable":
+                resolved_worker_identity["worker_type"] = "external_durable"
+                resolved_worker_identity["type"] = "external_durable"
+            elif worker is not None or auto_spawn:
                 resolved_worker_identity["worker_type"] = "in_process"
                 resolved_worker_identity["type"] = "in_process"
             elif resolved_worker_identity.get("pid") is not None and resolved_worker_identity.get("pid") != os.getpid():
@@ -774,7 +837,13 @@ class DurableRunManager:
                 resolved_worker_identity["worker_type"] = "in_process"
                 resolved_worker_identity["type"] = "in_process"
 
-        if "pid" not in resolved_worker_identity:
+        if launch_mode == "external_durable":
+            resolved_worker_identity.setdefault("worker_host_mode", "EXTERNAL_DURABLE_WORKER")
+            resolved_worker_identity.setdefault("runtime_interpreter", sys.executable)
+            resolved_worker_identity.setdefault("worker_host_start_time", _utc_now_iso())
+            resolved_worker_identity.setdefault("runtime_provenance_sha", _runtime_provenance_sha())
+            resolved_worker_identity.setdefault("launch_state", "RESERVED")
+        if "pid" not in resolved_worker_identity and launch_mode != "external_durable":
             resolved_worker_identity["pid"] = os.getpid()
 
         # 1. PERSIST-BEFORE-SPAWN: Insert initial RunRecord into SQLite
@@ -785,7 +854,7 @@ class DurableRunManager:
             task_id=contract.task_id,
             state=RunState.CREATED,
             state_version=1,
-            pid=resolved_worker_identity.get("pid", os.getpid()),
+            pid=resolved_worker_identity.get("pid") if launch_mode == "external_durable" else resolved_worker_identity.get("pid", os.getpid()),
             heartbeat=now_ts,
             created_at=now_ts,
             updated_at=now_ts,
@@ -822,11 +891,44 @@ class DurableRunManager:
                 last_error=baseline_error,
             )
 
-        # 2. SPAWN: Background execution decoupled from API caller
-        if auto_spawn and worker is not None:
+        # 2. SPAWN: injected callbacks remain process-local; production runs use
+        # a detached worker host that owns the callback and its AGY subprocess.
+        if auto_spawn and launch_mode == "external_durable":
+            try:
+                self._spawn_external_worker(persisted_record)
+            except Exception as exc:
+                latest = self.store.get_run(persisted_record.run_id) or persisted_record
+                if latest.state not in TERMINAL_STATES:
+                    return self.store.transition_run(
+                        latest.run_id,
+                        expected_version=latest.state_version,
+                        target_state=RunState.FAILED,
+                        last_error=f"DURABLE_WORKER_SPAWN_FAILED: {exc}",
+                    )
+                return latest
+        elif auto_spawn and worker is not None:
             self._spawn_worker(persisted_record, contract, worker, worktree=worktree)
 
         return persisted_record
+
+    def _spawn_external_worker(self, record: RunRecord) -> None:
+        """Spawn the durable worker host after the run identity is persisted."""
+        from .worker_host import spawn_worker_host
+
+        process = spawn_worker_host(self.store.db_path, record.run_id, sys.executable)
+        identity = self.store.get_worker_identity(record.run_id) or {}
+        identity.update(
+            {
+                "pid": process.pid,
+                "worker_host_pid": process.pid,
+                "worker_host_start_time": _utc_now_iso(),
+                "launch_state": "SPAWNED",
+                "runtime_interpreter": sys.executable,
+                "runtime_provenance_sha": _runtime_provenance_sha(),
+            }
+        )
+        self.store.update_worker_identity(record.run_id, identity)
+        self.store.update_worker_pid(record.run_id, process.pid)
 
     def _spawn_worker(
         self,
@@ -1427,7 +1529,7 @@ class DurableRunManager:
 
         contract = self.store.get_task_contract(record.run_id)
         if contract is not None:
-            terminal_reason = "HARD_TIMEOUT" if "timeout" in reason.lower() else "COMPLETED"
+            terminal_reason = "HARD_TIMEOUT" if "timeout" in reason.lower() else "INTERRUPTED"
             if self._harvest_existing_candidate(
                 record,
                 contract,

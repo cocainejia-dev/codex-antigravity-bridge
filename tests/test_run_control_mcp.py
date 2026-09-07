@@ -173,8 +173,8 @@ def test_run_start_persists_created_run(tmp_path: Path) -> None:
     assert record.state in (RunState.CREATED, RunState.QUEUED, RunState.RUNNING, RunState.COMPLETE)
 
 
-def test_run_start_with_callback_claims_in_process_worker(tmp_path: Path) -> None:
-    """MCP-created runs claim ownership only after a real callback is bound."""
+def test_run_start_claims_external_durable_worker(tmp_path: Path) -> None:
+    """Production MCP-created runs claim ownership through the durable host."""
     db_file = tmp_path / "vnext_no_callback.sqlite3"
     task = _sample_task_dict(task_id="task-no-callback-ownership")
 
@@ -184,8 +184,8 @@ def test_run_start_with_callback_claims_in_process_worker(tmp_path: Path) -> Non
     manager = DurableRunManager(db_file)
     identity = manager.store.get_worker_identity("run-no-callback-ownership")
     assert identity is not None
-    assert identity["worker_type"] == "in_process"
-    assert identity["type"] == "in_process"
+    assert identity["worker_type"] == "external_durable"
+    assert identity["type"] == "external_durable"
 
     observed = json.loads(run_observe(db_path=str(db_file), run_id="run-no-callback-ownership"))
     assert observed["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
@@ -219,23 +219,27 @@ def test_run_start_idempotency_and_duplicate_handling(tmp_path: Path, monkeypatc
 
         return worker
 
-    monkeypatch.setattr(server_module, "build_worker_callback", blocking_factory)
-
     # 1. Start with idempotency_key
-    res1 = run_start(db_path=str(db_file), task=task, idempotency_key="idem-key-abc")
+    res1 = server_module._run_start_impl(
+        db_path=str(db_file), task=task, idempotency_key="idem-key-abc", worker_factory=blocking_factory
+    )
     data1 = json.loads(res1)
     run_id1 = data1["run_id"]
     assert worker_entered.wait(timeout=1.0)
 
     # 2. Call again with same idempotency_key -> returns identical run
-    res2 = run_start(db_path=str(db_file), task=task, idempotency_key="idem-key-abc")
+    res2 = server_module._run_start_impl(
+        db_path=str(db_file), task=task, idempotency_key="idem-key-abc", worker_factory=blocking_factory
+    )
     data2 = json.loads(res2)
     assert data2["run_id"] == run_id1
     assert data2["state"] in {"CREATED", "QUEUED", "RUNNING", "COMPLETE"}
 
     # 3. Call with same task_id but different/no idempotency key -> DuplicateRunError
     with pytest.raises(DuplicateRunError):
-        run_start(db_path=str(db_file), task=task, idempotency_key="different-key")
+        server_module._run_start_impl(
+            db_path=str(db_file), task=task, idempotency_key="different-key", worker_factory=blocking_factory
+        )
     release_worker.set()
 
 
