@@ -191,6 +191,35 @@ def test_timeout_policy_is_risk_aware_and_bounded_wait_is_not_final(tmp_path: Pa
     assert waiting.acceptance == AcceptanceState.CANDIDATE_PENDING_REVIEW
 
 
+def test_interrupted_candidate_policy_is_truthful_and_risk_aware(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    (repo / "src" / "ui.py").write_text("VALUE = 2\n", encoding="utf-8")
+    audit = audit_candidate_scope(_contract(repo, baseline), repo, baseline)
+    low = evaluate_candidate(
+        worker_result=WorkerTerminalReason.INTERRUPTED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.LOW,
+    )
+    medium = evaluate_candidate(
+        worker_result="INTERRUPTED",
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.CODE_CHANGES,
+    )
+    high = evaluate_candidate(
+        worker_result="INTERRUPTED",
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.HIGH,
+    )
+    assert low.task_accepted
+    assert low.worker_result == WorkerTerminalReason.INTERRUPTED
+    assert medium.acceptance == AcceptanceState.CANDIDATE_REJECTED
+    assert high.acceptance == AcceptanceState.CANDIDATE_REJECTED
+
+
 def test_worker_reported_pass_does_not_bypass_independent_failure() -> None:
     from codex_agy_bridge.acceptance import ScopeAudit
 

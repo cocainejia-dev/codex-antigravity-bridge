@@ -263,6 +263,7 @@ class PlanExecutor:
     ) -> None:
         self.store = PlanExecutionStore(db_path)
         self.dangerously_skip_permissions = bool(dangerously_skip_permissions)
+        self._injected_worker_factory = worker_factory is not None
         self.worker_factory = worker_factory or (
             lambda contract: build_worker_callback(
                 contract,
@@ -499,19 +500,23 @@ class PlanExecutor:
         except Exception:
             existing = None
         if existing is None:
-            manager.run_start(
-                contract,
-                run_id=child_id,
-                worker=self.worker_factory(contract),
-                worker_identity={
+            start_kwargs = {
+                "run_id": child_id,
+                "worker_identity": {
                     "dangerously_skip_permissions": self.dangerously_skip_permissions,
                 },
-                worktree=record.integration_worktree,
-                repo=record.integration_worktree,
-                base_head=record.current_accepted_head,
-                auto_spawn=True,
-            )
-        child = manager.run_wait(child_id, timeout=shaped.max_runtime)
+                "worktree": record.integration_worktree,
+                "repo": record.integration_worktree,
+                "base_head": record.current_accepted_head,
+                "auto_spawn": True,
+            }
+            if self._injected_worker_factory:
+                start_kwargs["worker"] = self.worker_factory(contract)
+                start_kwargs["launch_mode"] = "in_process"
+            else:
+                start_kwargs["launch_mode"] = "external_durable"
+            manager.run_start(contract, **start_kwargs)
+        child = self._supervise_child(manager, child_id)
         task_state["child_run_state"] = child.state.value
         if child.state != RunState.COMPLETE:
             task_state["execution_state"] = PlanTaskState.FAILED.value
@@ -567,6 +572,20 @@ class PlanExecutor:
         record.active_task_id = None
         record.active_run_id = None
         self.store.save(record)
+
+    @staticmethod
+    def _supervise_child(manager: DurableRunManager, child_id: str):
+        """Observe child liveness in bounded intervals until it is terminal."""
+        while True:
+            observation = manager.run_observe(child_id)
+            if observation.record.state in {RunState.COMPLETE, RunState.FAILED, RunState.CANCELLED}:
+                return observation.record
+            if observation.is_alive and not observation.is_stale:
+                time.sleep(0.25)
+                continue
+            # A dead/stale child has already been reconciled by run_observe;
+            # return its durable state without spawning a replacement.
+            return observation.record
 
     def _final_verify(self, record: PlanExecutionRecord, plan: TaskPlan) -> None:
         record.state = PlanExecutionState.FINAL_VERIFYING
