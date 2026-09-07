@@ -481,6 +481,43 @@ class DurableRunStore:
             raise RunNotFoundError(f"Run {run_id} not found")
         return record
 
+    def claim_worker_host(self, run_id: str, reservation_pid: int, actual_pid: int) -> bool:
+        """Atomically replace a launcher PID with the actual worker interpreter PID."""
+        if not isinstance(reservation_pid, int) or reservation_pid <= 0:
+            raise ValueError("reservation_pid must be a positive integer")
+        if not isinstance(actual_pid, int) or actual_pid <= 0:
+            raise ValueError("actual_pid must be a positive integer")
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT worker_identity_json FROM runs WHERE run_id=?",
+                    (run_id,),
+                ).fetchone()
+                if row is None or not row["worker_identity_json"]:
+                    conn.rollback()
+                    return False
+                identity = json.loads(row["worker_identity_json"])
+                if identity.get("launch_state") != "SPAWNED" or identity.get("pid") != reservation_pid:
+                    conn.rollback()
+                    return False
+                identity["reservation_pid"] = reservation_pid
+                identity["pid"] = actual_pid
+                identity["worker_host_pid"] = actual_pid
+                identity["launch_state"] = "ACTIVE"
+                conn.execute(
+                    "UPDATE runs SET worker_identity_json=?, pid=?, updated_at=? WHERE run_id=?",
+                    (json.dumps(identity, sort_keys=True), actual_pid, _utc_now_iso(), run_id),
+                )
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
     def get_active_run_by_task_id(self, task_id: str) -> RunRecord | None:
         """Fetch an active (non-terminal) run for a task_id if one exists."""
         terminal_values = [s.value for s in TERMINAL_STATES]
@@ -921,6 +958,7 @@ class DurableRunManager:
             {
                 "pid": process.pid,
                 "worker_host_pid": process.pid,
+                "reservation_pid": process.pid,
                 "worker_host_start_time": _utc_now_iso(),
                 "launch_state": "SPAWNED",
                 "runtime_interpreter": sys.executable,
