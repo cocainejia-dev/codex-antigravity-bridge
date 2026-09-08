@@ -588,6 +588,7 @@ def run_result(
             "worker_terminal_reason",
             "worker_report_available",
             "candidate_source",
+            "candidate_head",
             "candidate_discovered",
             "changed_files",
             "out_of_scope_files",
@@ -617,6 +618,7 @@ def run_result(
             ledger=ledger,
             run_id=record.run_id,
             db_path_str=str(telemetry_db),
+            candidate_evidence=manifest,
         )
         html_content = generate_html_report(report_data)
         target_path, _alias = resolve_report_path(

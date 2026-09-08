@@ -84,6 +84,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     a_fail = agy.get("failures", 0)
     a_files = agy.get("changed_files", 0)
     a_lines = agy.get("lines_of_code", 0)
+    implementation_source = agy.get("implementation_attribution_source", "UNAVAILABLE")
 
     # Reliability metrics
     r_count = retries.get("total_count", 0)
@@ -101,9 +102,11 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     src_map = sources.get("events_by_source", {})
 
     # Call share calculation (strictly labeled as 调用占比 / DERIVED, never workload/token/cost share)
-    total_calls = (a_calls + c_calls) if (a_calls + c_calls) > 0 else 1
-    agy_call_pct = round((a_calls / total_calls) * 100, 1) if (a_calls + c_calls) > 0 else 50.0
-    codex_call_pct = round((c_calls / total_calls) * 100, 1) if (a_calls + c_calls) > 0 else 50.0
+    calls_observable = a_calls is not None and c_calls is not None
+    total_calls = (a_calls + c_calls) if calls_observable and (a_calls + c_calls) > 0 else 1
+    agy_call_pct = round((a_calls / total_calls) * 100, 1) if calls_observable and (a_calls + c_calls) > 0 else (50.0 if calls_observable else 0.0)
+    codex_call_pct = round((c_calls / total_calls) * 100, 1) if calls_observable and (a_calls + c_calls) > 0 else (50.0 if calls_observable else 0.0)
+    call_share_label = "调用数据不可用 (UNAVAILABLE)" if not calls_observable else None
 
     # Build Unit Totals Table Rows
     unit_rows: list[str] = []
@@ -397,10 +400,11 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
       </div>
       <div class="stat-primary">{_format_num(a_secs)}s</div>
       <ul class="stat-list">
-        <li><span class="text-muted">调用次数 / 启动</span><strong class="font-mono">{a_calls} 次调用</strong></li>
+        <li><span class="text-muted">调用次数 / 启动</span><strong class="font-mono">{_format_num(a_calls)} 次调用</strong></li>
         <li><span class="text-muted">成功 / 失败</span><strong class="font-mono">{a_succ} / {a_fail}</strong></li>
-        <li><span class="text-muted">变更文件数</span><strong class="font-mono">{a_files} 个文件</strong></li>
-        <li><span class="text-muted">代码差异行数</span><strong class="font-mono">{a_lines} 行</strong></li>
+        <li><span class="text-muted">变更文件数</span><strong class="font-mono">{_format_num(a_files)} 个文件</strong></li>
+        <li><span class="text-muted">代码差异行数</span><strong class="font-mono">{_format_num(a_lines)} 行</strong></li>
+        <li><span class="text-muted">实现归因来源</span><strong class="font-mono">{_esc(implementation_source)}</strong></li>
       </ul>
     </div>
 
@@ -454,7 +458,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
       <span class="badge badge-derived">DERIVED</span>
     </div>
     <div class="workload-bar-container">
-      <div class="bar-agy" style="width: {agy_call_pct}%;">Antigravity 调用占比 ({agy_call_pct}%)</div>
+      <div class="bar-agy" style="width: {agy_call_pct}%;">{call_share_label or f'Antigravity 调用占比 ({agy_call_pct}%)'}</div>
       <div class="bar-codex" style="width: {codex_call_pct}%;">Codex 调用占比 ({codex_call_pct}%)</div>
     </div>
     <div class="disclaimer-box">

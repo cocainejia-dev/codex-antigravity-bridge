@@ -1185,7 +1185,7 @@ class DurableRunManager:
                     )
                 else:
                     # Failure or custom target state
-                    if worker_result.terminal_reason in ("HARD_TIMEOUT", "COMPLETED"):
+                    if worker_result.terminal_reason in ("HARD_TIMEOUT", "COMPLETED", "FAILED"):
                         harvested = self._harvest_existing_candidate(
                             latest,
                             contract,
@@ -1315,6 +1315,10 @@ class DurableRunManager:
         """Reconcile a terminal worker with controller-owned worktree evidence."""
         from .acceptance import harvest_candidate
 
+        # A terminal callback is not enough evidence when an external worker
+        # process is still alive; preserve the worktree for reconciliation.
+        if record.pid and record.pid != os.getpid() and is_pid_alive(record.pid):
+            return False
         try:
             manifest, audit = harvest_candidate(
                 contract,
@@ -1333,6 +1337,8 @@ class DurableRunManager:
             candidate=True,
             terminal_reason=manifest.worker_terminal_reason,
             result_summary="Controller-discovered worktree candidate",
+            commit_sha=manifest.candidate_head or None,
+            current_head=manifest.candidate_head or None,
         )
         acceptance = self._accept_candidate(contract, harvested_result, worktree=worktree)
         if manifest.attribution_status != "PASS":
@@ -1363,6 +1369,7 @@ class DurableRunManager:
                 expected_version=latest.state_version,
                 target_state=RunState.VERIFYING,
                 verification_result=payload,
+                current_head=manifest.candidate_head or None,
             )
             if accepted:
                 self.store.transition_run(
@@ -1371,6 +1378,8 @@ class DurableRunManager:
                     target_state=RunState.COMPLETE,
                     verification_result=payload,
                     result_summary="INDEPENDENTLY_HARVESTED_AND_VERIFIED",
+                    commit_sha=manifest.candidate_head or None,
+                    current_head=manifest.candidate_head or None,
                 )
             else:
                 self.store.transition_run(
@@ -1380,6 +1389,8 @@ class DurableRunManager:
                     verification_result=payload,
                     result_summary="Harvested candidate rejected",
                     last_error=manifest.acceptance_reason,
+                    commit_sha=manifest.candidate_head or None,
+                    current_head=manifest.candidate_head or None,
                 )
             return True
         except (InvalidStateTransitionError, ConcurrentModificationError):

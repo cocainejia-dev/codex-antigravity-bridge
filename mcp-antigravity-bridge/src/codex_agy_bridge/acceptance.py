@@ -151,6 +151,7 @@ class CandidateManifest:
     contract_digest: str | None
     worktree: str
     isolated_worktree: bool
+    candidate_head: str = ""
     changed_files: tuple[str, ...] = ()
     out_of_scope_files: tuple[str, ...] = ()
     forbidden_files: tuple[str, ...] = ()
@@ -171,6 +172,7 @@ class CandidateManifest:
             "run_id": self.run_id,
             "task_id": self.task_id,
             "candidate_source": self.candidate_source,
+            "candidate_head": self.candidate_head,
             "discovered_at": self.discovered_at,
             "worker_terminal_reason": self.worker_terminal_reason,
             "worker_report_available": self.worker_report_available,
@@ -234,11 +236,17 @@ def harvest_candidate(
         actual_head = _git(root, "rev-parse", "HEAD").strip()
     except RuntimeError:
         pass
+    committed_candidate = bool(actual_head and actual_head != baseline.head)
+    if committed_candidate:
+        try:
+            _git(root, "merge-base", "--is-ancestor", baseline.head, actual_head)
+        except RuntimeError:
+            committed_candidate = False
     attributed = bool(
         audit.changed_files
         and contract.isolated_worktree
         and bool(contract.base_head)
-        and actual_head == baseline.head
+        and (actual_head == baseline.head or committed_candidate)
         and not audit.baseline_overlap_files
         and root == Path(contract.workdir).expanduser().resolve()
     )
@@ -248,7 +256,8 @@ def harvest_candidate(
             candidate_id=f"candidate-{run_id}",
             run_id=run_id,
             task_id=contract.task_id,
-            candidate_source="WORKTREE_HARVEST",
+            candidate_source=("WORKTREE_HARVEST_COMMITTED" if committed_candidate else "WORKTREE_HARVEST"),
+            candidate_head=actual_head if committed_candidate else "",
             discovered_at=datetime.now(timezone.utc).isoformat(),
             worker_terminal_reason=WorkerTerminalReason(worker_terminal_reason).value,
             worker_report_available=worker_report_available,
