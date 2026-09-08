@@ -9,6 +9,7 @@ PID without replaying it.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import subprocess
@@ -20,21 +21,47 @@ from .run_control import DurableRunManager, RunState
 from .worker_binding import build_worker_callback
 
 
-def spawn_worker_host(db_path: str | Path, run_id: str, interpreter: str) -> subprocess.Popen:
-    """Start a detached host with stdio disconnected from the MCP process."""
+@dataclass(frozen=True)
+class _ProcessReservation:
+    """Minimal process handle returned by service-created Windows processes."""
+
+    pid: int
+
+
+def _spawn_windows_worker(args: list[str]) -> _ProcessReservation:
+    """Create the worker through WMI so MCP Job Object cleanup cannot reap it."""
+    try:
+        import win32com.client
+    except ImportError as exc:  # pragma: no cover - exercised on misconfigured Windows hosts
+        raise RuntimeError("Windows durable workers require pywin32") from exc
+
+    service = win32com.client.GetObject(
+        r"winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2"
+    )
+    process_class = service.Get("Win32_Process")
+    method = process_class.Methods_.Item("Create")
+    params = method.InParameters.SpawnInstance_()
+    params.Properties_.Item("CommandLine").Value = subprocess.list2cmdline(args)
+    result = service.ExecMethod(process_class.Path_.Path, "Create", params)
+    return_value = int(result.Properties_.Item("ReturnValue").Value)
+    if return_value != 0:
+        raise OSError(f"WMI Win32_Process.Create failed with return value {return_value}")
+    return _ProcessReservation(pid=int(result.Properties_.Item("ProcessId").Value))
+
+
+def spawn_worker_host(db_path: str | Path, run_id: str, interpreter: str) -> subprocess.Popen | _ProcessReservation:
+    """Start a host outside the MCP process lifetime boundary."""
     args = [interpreter, "-m", "codex_agy_bridge.worker_host", "--db-path", str(Path(db_path).resolve()), "--run-id", run_id]
+    if os.name == "nt":
+        return _spawn_windows_worker(args)
+
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if os.name == "nt":
-        # A detached process group prevents console/pipe teardown from being
-        # inherited as a lifetime boundary.  No ConPTY handles are involved.
-        kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    else:
-        kwargs["start_new_session"] = True
+    kwargs["start_new_session"] = True
     return subprocess.Popen(args, **kwargs)  # type: ignore[arg-type]
 
 

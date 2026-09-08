@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import ctypes
 import os
 import subprocess
 import sys
@@ -10,6 +12,8 @@ import pytest
 from codex_agy_bridge import worker_host
 from codex_agy_bridge.contracts import TaskContract
 from codex_agy_bridge.run_control import DuplicateRunError, DurableRunManager
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 
 def _contract(workdir: Path, task_id: str = "durable-host-test") -> TaskContract:
@@ -96,3 +100,54 @@ def test_windows_detached_worker_survives_parent_exit(tmp_path: Path) -> None:
     while time.monotonic() < deadline and not marker.exists():
         time.sleep(0.05)
     assert marker.read_text(encoding="utf-8") == "alive"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="covers the Windows service-created process boundary")
+def test_windows_wmi_worker_survives_mcp_job_cleanup(tmp_path: Path) -> None:
+    """A WMI-created worker remains alive after MCP stdio cleanup."""
+    pid_file = tmp_path / "worker.pid"
+    child = tmp_path / "wmi-child.py"
+    parent = tmp_path / "wmi-parent.py"
+    child.write_text(
+        f"import os,pathlib,time; pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    parent.write_text(
+        "import os,pathlib,sys,time\n"
+        "from codex_agy_bridge.worker_host import _spawn_windows_worker\n"
+        f"pathlib.Path({str(tmp_path / 'parent.pid')!r}).write_text(str(os.getpid()))\n"
+        f"_spawn_windows_worker([sys.executable,{str(child)!r}])\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+
+    async def exercise() -> int:
+        source = Path(__file__).resolve().parents[1] / "mcp-antigravity-bridge" / "src"
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            value for value in (str(source), env.get("PYTHONPATH")) if value
+        )
+        params = StdioServerParameters(command=sys.executable, args=[str(parent)], cwd=str(tmp_path), env=env)
+        async with stdio_client(params):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not pid_file.exists():
+                await asyncio.sleep(0.05)
+            assert pid_file.exists()
+            parent_pid = int((tmp_path / "parent.pid").read_text())
+            await asyncio.to_thread(
+                subprocess.run,
+                ["taskkill", "/PID", str(parent_pid), "/F"],
+                check=True,
+                capture_output=True,
+            )
+            return int(pid_file.read_text())
+
+    worker_pid = asyncio.run(exercise())
+    time.sleep(0.5)
+    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, worker_pid)
+    try:
+        assert handle
+    finally:
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        subprocess.run(["taskkill", "/PID", str(worker_pid), "/F"], check=False, capture_output=True)
