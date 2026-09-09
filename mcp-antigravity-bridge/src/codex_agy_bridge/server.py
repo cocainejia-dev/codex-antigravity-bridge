@@ -599,6 +599,7 @@ def run_result(
             "acceptance_status",
             "acceptance_reason",
             "diff_sha256",
+            "diff_lines",
         ):
             payload[field_name] = manifest.get(field_name)
         acceptance = verification.get("acceptance")

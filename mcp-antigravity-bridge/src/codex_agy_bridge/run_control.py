@@ -1185,12 +1185,13 @@ class DurableRunManager:
                     )
                 else:
                     # Failure or custom target state
-                    if worker_result.terminal_reason in ("HARD_TIMEOUT", "COMPLETED", "FAILED"):
+                    terminal_reason = worker_result.terminal_reason or "FAILED"
+                    if terminal_reason in ("HARD_TIMEOUT", "COMPLETED", "FAILED"):
                         harvested = self._harvest_existing_candidate(
                             latest,
                             contract,
                             worktree=worktree or contract.workdir,
-                            terminal_reason=worker_result.terminal_reason,
+                            terminal_reason=terminal_reason,
                             worker_report_available=bool(worker_result.output or worker_result.result_summary),
                         )
                         if harvested:
@@ -1371,7 +1372,7 @@ class DurableRunManager:
                 verification_result=payload,
                 current_head=manifest.candidate_head or None,
             )
-            if accepted:
+            if accepted and terminal_reason != "FAILED":
                 self.store.transition_run(
                     record.run_id,
                     expected_version=verifying.state_version,

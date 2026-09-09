@@ -128,8 +128,37 @@ def test_failed_worker_harvests_candidate_but_attribution_remains_rejected(tmp_p
         risk_class=RiskClass.LOW,
     )
     assert manifest.candidate_discovered is True
+    assert manifest.diff_lines == 2
     assert result.task_accepted is False
     assert result.acceptance == AcceptanceState.FAILED
+
+
+def test_failed_candidate_can_only_be_accepted_by_explicit_independent_review(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    contract = _contract(repo, baseline, risk=RiskClass.HIGH)
+    (repo / "src" / "ui.py").write_text("VALUE = 2\nVALUE_2 = 3\n", encoding="utf-8")
+    audit = audit_candidate_scope(contract, repo, baseline)
+
+    automatic = evaluate_candidate(
+        worker_result=WorkerTerminalReason.FAILED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.HIGH,
+    )
+    reviewed = evaluate_candidate(
+        worker_result=WorkerTerminalReason.FAILED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.HIGH,
+        allow_failed_candidate_acceptance=True,
+    )
+
+    assert automatic.task_accepted is False
+    assert automatic.acceptance == AcceptanceState.FAILED
+    assert reviewed.task_accepted is True
+    assert reviewed.acceptance == AcceptanceState.ACCEPTED
+    assert "FAILED_REVIEW" in reviewed.reasons[0]
 
 
 def test_committed_candidate_recovers_head_and_attribution(tmp_path: Path) -> None:
