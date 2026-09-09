@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,6 @@ def test_update_codex_config_preserves_unmanaged_settings(tmp_path: Path) -> Non
     config = tmp_path / "config.toml"
     config.write_text(
         "[mcp_servers.codex-agy-bridge]\n"
-        'command = "python"\n'
         'args = ["-m", "codex_agy_bridge"]\n'
         "startup_timeout_sec = 120\n"
         "\n"
@@ -49,6 +49,79 @@ def test_update_codex_config_preserves_unmanaged_settings(tmp_path: Path) -> Non
     assert content.count('HTTP_PROXY = "http://127.0.0.1:7890"') == 1
     assert 'HTTP_PROXY = "http://old:1"' not in content
     assert 'root = "keep"' in content
+
+
+def test_update_codex_config_preserves_existing_production_command(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[mcp_servers.codex-agy-bridge]\n"
+        'command = "D:\\\\CODEX项目\\\\agy-supervisor-runtime\\\\.venv\\\\Scripts\\\\python.exe"\n'
+        'args = ["-m", "codex_agy_bridge"]\n',
+        encoding="utf-8",
+    )
+
+    setup.update_codex_config(config, r"C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe", None)
+
+    assert "agy-supervisor-runtime" in config.read_text(encoding="utf-8")
+    assert "Python312" not in config.read_text(encoding="utf-8")
+
+
+def test_update_codex_config_fills_missing_command(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[mcp_servers.codex-agy-bridge]\n"
+        'args = ["-m", "codex_agy_bridge"]\n',
+        encoding="utf-8",
+    )
+
+    setup.update_codex_config(config, r"C:\Python\python.exe", None)
+
+    assert 'command = "C:\\\\Python\\\\python.exe"' in config.read_text(encoding="utf-8")
+
+
+def test_update_codex_config_preserves_existing_command_when_proxy_changes(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[mcp_servers.codex-agy-bridge]\n"
+        'command = "D:\\\\production\\\\python.exe"\n'
+        'args = ["-m", "codex_agy_bridge"]\n',
+        encoding="utf-8",
+    )
+
+    setup.update_codex_config(config, r"C:\Python\python.exe", "http://127.0.0.1:7890")
+    content = config.read_text(encoding="utf-8")
+
+    assert 'command = "D:\\\\production\\\\python.exe"' in content
+    assert 'HTTP_PROXY = "http://127.0.0.1:7890"' in content
+
+
+def test_setup_first_registration_uses_current_interpreter(tmp_path: Path, monkeypatch) -> None:
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    config = codex_home / "config.toml"
+    calls: list[tuple[str, ...]] = []
+    current_python = r"C:\Python\python.exe"
+
+    def fake_run_codex(codex: str, *args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("mcp", "add"):
+            config.write_text(
+                "[mcp_servers.codex-agy-bridge]\n"
+                'args = ["-m", "codex_agy_bridge"]\n',
+                encoding="utf-8",
+            )
+        return subprocess.CompletedProcess([codex, *args], 0, stdout="", stderr="")
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "codex.exe")
+    monkeypatch.setattr(setup, "_run_codex", fake_run_codex)
+    monkeypatch.setattr(setup, "_copy_skill", lambda destination: None)
+    monkeypatch.setattr(setup.sys, "executable", current_python)
+
+    assert setup.main(["--no-proxy"]) == 0
+
+    assert ("mcp", "add", "codex-agy-bridge", "--", current_python, "-m", "codex_agy_bridge") in calls
+    assert current_python.replace("\\", "\\\\") in config.read_text(encoding="utf-8")
 
 
 def test_what_if_is_side_effect_free(tmp_path: Path, monkeypatch, capsys) -> None:

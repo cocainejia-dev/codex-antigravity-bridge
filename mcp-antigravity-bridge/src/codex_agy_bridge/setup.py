@@ -82,6 +82,16 @@ def _section_end(lines: list[str], start: int) -> int:
     )
 
 
+def _existing_mcp_command(lines: list[str], command_indices: list[int]) -> str | None:
+    """Return the configured MCP command when it is present and non-empty."""
+    if not command_indices:
+        return None
+    value = lines[command_indices[0]].split("=", 1)[1].split("#", 1)[0].strip()
+    if len(value) >= 2 and value[0] in {"'", '"'} and value[-1] == value[0]:
+        value = value[1:-1]
+    return value.strip() or None
+
+
 def update_codex_config(config_path: Path, python_executable: str, proxy: str | None) -> None:
     if not config_path.is_file():
         raise SetupError(f"Codex config was not found at {config_path}.")
@@ -97,11 +107,13 @@ def update_codex_config(config_path: Path, python_executable: str, proxy: str | 
         for index in range(server_start + 1, server_end)
         if lines[index].lstrip().startswith("command")
     ]
+    existing_command = _existing_mcp_command(lines, command_indices)
     command = f"command = {_toml_string(python_executable)}"
-    if command_indices:
+    if command_indices and not existing_command:
         lines[command_indices[0]] = command
     else:
-        lines.insert(server_start + 1, command)
+        if not command_indices:
+            lines.insert(server_start + 1, command)
 
     env_start = lines.index(_ENV_HEADER) if _ENV_HEADER in lines else -1
     if env_start >= 0:
