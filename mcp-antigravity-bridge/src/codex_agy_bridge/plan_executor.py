@@ -62,9 +62,17 @@ def _now() -> str:
 
 
 def _git(worktree: str, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", worktree, *args], capture_output=True, text=True, timeout=15
-    )
+    command = ["git", "-C", worktree, *args]
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=15
+            )
+            break
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise
+            time.sleep(0.1)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()

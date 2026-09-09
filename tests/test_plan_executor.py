@@ -5,7 +5,11 @@ import subprocess
 import threading
 from pathlib import Path
 
-from codex_agy_bridge.plan_executor import PlanExecutionState, PlanExecutor, PlanTaskState
+from codex_agy_bridge.plan_executor import (
+    PlanExecutionState,
+    PlanExecutor,
+    PlanTaskState,
+)
 from codex_agy_bridge.run_control import WorkerResult
 from codex_agy_bridge.task_shaping import shape_task
 
@@ -88,6 +92,48 @@ def test_failure_blocks_dependents_without_replay(tmp_path: Path) -> None:
     assert result.tasks["t2"]["execution_state"] == PlanTaskState.FAILED.value
     assert result.tasks["t3"]["execution_state"] == PlanTaskState.PENDING.value
     assert result.current_accepted_head == result.tasks["t1"]["accepted_checkpoint_sha"]
+
+
+def test_checkpoint_git_timeout_retries_without_replaying_worker(tmp_path: Path, monkeypatch) -> None:
+    repo, head = _repo(tmp_path)
+    db = tmp_path / "plan.sqlite3"
+    starts: list[str] = []
+    real_run = subprocess.run
+    timed_out = False
+
+    def flaky_run(command, *args, **kwargs):
+        nonlocal timed_out
+        if (
+            not timed_out
+            and command[:2] == ["git", "-C"]
+            and command[-2:] == ["rev-parse", "HEAD"]
+        ):
+            timed_out = True
+            raise subprocess.TimeoutExpired(command, timeout=15)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", flaky_run)
+
+    def factory(contract):
+        def worker(_ctx):
+            starts.append(contract.task_id)
+            target = {"t1": "a.txt", "t2": "b.txt", "t3": "c.txt"}[contract.task_id]
+            (repo / target).write_text(contract.task_id, encoding="utf-8")
+            return WorkerResult(
+                success=True,
+                candidate=True,
+                verification_result={"passed": True},
+                result_summary="timeout-retry",
+                terminal_reason="COMPLETED",
+            )
+
+        return worker
+
+    executor = PlanExecutor(db, worker_factory=factory)
+    executor.start(_plan(repo, head), integration_worktree=str(repo), initial_base_head=head, execution_id="exec-timeout-retry")
+    result = executor.wait("exec-timeout-retry", timeout=15)
+    assert result.state == PlanExecutionState.COMPLETE
+    assert starts == ["t1", "t2", "t3"]
 
 
 def test_start_is_idempotent_and_high_risk_requires_authorization(tmp_path: Path) -> None:
