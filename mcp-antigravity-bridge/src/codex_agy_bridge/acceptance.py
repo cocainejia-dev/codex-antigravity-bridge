@@ -151,11 +151,13 @@ class CandidateManifest:
     contract_digest: str | None
     worktree: str
     isolated_worktree: bool
+    candidate_head: str = ""
     changed_files: tuple[str, ...] = ()
     out_of_scope_files: tuple[str, ...] = ()
     forbidden_files: tuple[str, ...] = ()
     baseline_overlap_files: tuple[str, ...] = ()
     diff_sha256: str = ""
+    diff_lines: int | None = None
     candidate_file_hashes: dict[str, str] = field(default_factory=dict)
     candidate_discovered: bool = False
     attribution_status: str = "INSUFFICIENT"
@@ -171,6 +173,7 @@ class CandidateManifest:
             "run_id": self.run_id,
             "task_id": self.task_id,
             "candidate_source": self.candidate_source,
+            "candidate_head": self.candidate_head,
             "discovered_at": self.discovered_at,
             "worker_terminal_reason": self.worker_terminal_reason,
             "worker_report_available": self.worker_report_available,
@@ -183,6 +186,7 @@ class CandidateManifest:
             "forbidden_files": list(self.forbidden_files),
             "baseline_overlap_files": list(self.baseline_overlap_files),
             "diff_sha256": self.diff_sha256,
+            "diff_lines": self.diff_lines,
             "candidate_file_hashes": dict(self.candidate_file_hashes),
             "candidate_discovered": self.candidate_discovered,
             "attribution_status": self.attribution_status,
@@ -229,16 +233,37 @@ def harvest_candidate(
         ]
     )
     diff_sha256 = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
+    diff_lines: int | None = None
+    try:
+        diff_lines = 0
+        for row in _git(root, "diff", "--numstat", baseline.head).splitlines():
+            fields = row.split("\t")
+            if len(fields) >= 2:
+                try:
+                    additions = int(fields[0])
+                    deletions = int(fields[1])
+                except ValueError:
+                    # Binary files have '-' numstat fields and no line count.
+                    continue
+                diff_lines += additions + deletions
+    except RuntimeError:
+        diff_lines = None
     actual_head = ""
     try:
         actual_head = _git(root, "rev-parse", "HEAD").strip()
     except RuntimeError:
         pass
+    committed_candidate = bool(actual_head and actual_head != baseline.head)
+    if committed_candidate:
+        try:
+            _git(root, "merge-base", "--is-ancestor", baseline.head, actual_head)
+        except RuntimeError:
+            committed_candidate = False
     attributed = bool(
         audit.changed_files
         and contract.isolated_worktree
         and bool(contract.base_head)
-        and actual_head == baseline.head
+        and (actual_head == baseline.head or committed_candidate)
         and not audit.baseline_overlap_files
         and root == Path(contract.workdir).expanduser().resolve()
     )
@@ -248,7 +273,8 @@ def harvest_candidate(
             candidate_id=f"candidate-{run_id}",
             run_id=run_id,
             task_id=contract.task_id,
-            candidate_source="WORKTREE_HARVEST",
+            candidate_source=("WORKTREE_HARVEST_COMMITTED" if committed_candidate else "WORKTREE_HARVEST"),
+            candidate_head=actual_head if committed_candidate else "",
             discovered_at=datetime.now(timezone.utc).isoformat(),
             worker_terminal_reason=WorkerTerminalReason(worker_terminal_reason).value,
             worker_report_available=worker_report_available,
@@ -261,6 +287,7 @@ def harvest_candidate(
             forbidden_files=audit.forbidden_files,
             baseline_overlap_files=audit.baseline_overlap_files,
             diff_sha256=diff_sha256,
+            diff_lines=diff_lines,
             candidate_file_hashes=current_hashes,
             candidate_discovered=bool(audit.changed_files),
             attribution_status=attribution,
@@ -496,6 +523,7 @@ def evaluate_candidate(
     independently_verified: bool,
     risk_class: RiskClass | str = RiskClass.MEDIUM,
     worker_alive: bool = False,
+    allow_failed_candidate_acceptance: bool = False,
 ) -> CandidateAcceptance:
     """Convert worker evidence into an explicit, independently reviewed acceptance."""
     reason: list[str] = []
@@ -507,6 +535,16 @@ def evaluate_candidate(
         reason.append("Scope or diff audit failed")
         return CandidateAcceptance(terminal, AcceptanceState.CANDIDATE_REJECTED, False, risk.value, scope_audit, independently_verified, tuple(reason))
     if terminal == WorkerTerminalReason.FAILED:
+        if allow_failed_candidate_acceptance and independently_verified:
+            return CandidateAcceptance(
+                terminal,
+                AcceptanceState.ACCEPTED,
+                True,
+                risk.value,
+                scope_audit,
+                True,
+                ("ACCEPTED_AFTER_INDEPENDENT_FAILED_REVIEW",),
+            )
         return CandidateAcceptance(terminal, AcceptanceState.FAILED, False, risk.value, scope_audit, independently_verified, ("Worker reported failure",))
     if terminal == WorkerTerminalReason.HARD_TIMEOUT:
         if risk in {RiskClass.HIGH, RiskClass.MEDIUM, RiskClass.DESTRUCTIVE, RiskClass.PRODUCTION}:

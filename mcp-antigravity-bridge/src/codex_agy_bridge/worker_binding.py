@@ -102,7 +102,7 @@ def build_worker_callback(
 
             result = runner(prompt, **runner_kwargs)
         except Exception as exc:  # Worker lifecycle records the failure durably.
-            return WorkerResult(success=False, last_error=str(exc))
+            return WorkerResult(success=False, terminal_reason="FAILED", last_error=str(exc))
 
         if result.exit_code == 0:
             return WorkerResult(
@@ -133,6 +133,7 @@ def build_worker_callback(
             output=result.text,
             last_error=result.text or f"agy exited with code {result.exit_code}",
             verification_result={"passed": False, "status": "failed", "returncode": result.exit_code},
+            terminal_reason="FAILED",
         )
 
     return _worker

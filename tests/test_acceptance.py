@@ -109,6 +109,79 @@ def test_worktree_harvest_no_diff_is_not_a_candidate(tmp_path: Path) -> None:
     assert audit.passed
 
 
+def test_failed_worker_harvests_candidate_but_attribution_remains_rejected(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    contract = _contract(repo, baseline)
+    (repo / "src" / "ui.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    manifest, audit = harvest_candidate(
+        contract,
+        run_id="run-failed-harvest",
+        worktree=str(repo),
+        worker_terminal_reason=WorkerTerminalReason.FAILED,
+    )
+    result = evaluate_candidate(
+        worker_result=WorkerTerminalReason.FAILED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.LOW,
+    )
+    assert manifest.candidate_discovered is True
+    assert manifest.diff_lines == 2
+    assert result.task_accepted is False
+    assert result.acceptance == AcceptanceState.FAILED
+
+
+def test_failed_candidate_can_only_be_accepted_by_explicit_independent_review(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    contract = _contract(repo, baseline, risk=RiskClass.HIGH)
+    (repo / "src" / "ui.py").write_text("VALUE = 2\nVALUE_2 = 3\n", encoding="utf-8")
+    audit = audit_candidate_scope(contract, repo, baseline)
+
+    automatic = evaluate_candidate(
+        worker_result=WorkerTerminalReason.FAILED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.HIGH,
+    )
+    reviewed = evaluate_candidate(
+        worker_result=WorkerTerminalReason.FAILED,
+        scope_audit=audit,
+        independently_verified=True,
+        risk_class=RiskClass.HIGH,
+        allow_failed_candidate_acceptance=True,
+    )
+
+    assert automatic.task_accepted is False
+    assert automatic.acceptance == AcceptanceState.FAILED
+    assert reviewed.task_accepted is True
+    assert reviewed.acceptance == AcceptanceState.ACCEPTED
+    assert "FAILED_REVIEW" in reviewed.reasons[0]
+
+
+def test_committed_candidate_recovers_head_and_attribution(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
+    contract = _contract(repo, baseline)
+    (repo / "src" / "ui.py").write_text("VALUE = 3\n", encoding="utf-8")
+    _git(repo, "add", "src/ui.py")
+    _git(repo, "commit", "-qm", "candidate")
+    candidate_head = _git(repo, "rev-parse", "HEAD")
+
+    manifest, audit = harvest_candidate(
+        contract,
+        run_id="run-committed-harvest",
+        worktree=str(repo),
+        worker_terminal_reason=WorkerTerminalReason.FAILED,
+    )
+    assert audit.passed
+    assert manifest.candidate_source == "WORKTREE_HARVEST_COMMITTED"
+    assert manifest.candidate_head == candidate_head
+    assert manifest.attribution_status == "PASS"
+
+
 def test_package_json_regression_is_rejected_and_evidence_retained(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     baseline = capture_baseline_snapshot(repo, isolated_worktree=True)
