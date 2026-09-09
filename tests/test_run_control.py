@@ -181,6 +181,81 @@ def test_low_timeout_harvests_worktree_candidate_and_persists_manifest(tmp_path:
     assert reloaded.verification_result["candidate_manifest"]["candidate_discovered"] is True
 
 
+def test_failed_worker_harvests_but_does_not_accept_candidate(tmp_path: Path) -> None:
+    repo = tmp_path / "failed-harvest-repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Harvest Test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    contract = _create_sample_contract(
+        task_id="task-failed-harvest",
+        workdir=str(repo),
+        base_head=head,
+        allowed_paths=["src/feature.py"],
+        forbidden_paths=["secrets.json"],
+        verification_commands=["python -c pass"],
+        risk_class=RiskClass.LOW,
+        isolated_worktree=True,
+    )
+    manager = DurableRunManager(tmp_path / "failed-harvest.sqlite3")
+
+    def failed_worker(_ctx: WorkerContext) -> WorkerResult:
+        (repo / "src" / "feature.py").write_text("VALUE = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "src/feature.py"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "candidate"], cwd=repo, check=True)
+        return WorkerResult(success=False, terminal_reason="FAILED", last_error="worker failed after editing")
+
+    record = manager.run_start(contract, worker=failed_worker, worktree=str(repo), repo=str(repo))
+    final = manager.run_wait(record.run_id, timeout=10)
+    assert final.state == RunState.FAILED
+    assert final.verification_result["candidate_manifest"]["candidate_discovered"] is True
+    assert final.verification_result["candidate_manifest"]["candidate_source"] == "WORKTREE_HARVEST_COMMITTED"
+    assert final.verification_result["candidate_manifest"]["acceptance_status"] == "REJECTED"
+    assert final.verification_result["acceptance"]["task_accepted"] is False
+    candidate_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    assert final.current_head == candidate_head
+    assert final.commit_sha == candidate_head
+
+
+def test_failed_worker_without_terminal_reason_still_harvests_candidate(tmp_path: Path) -> None:
+    repo = tmp_path / "failed-missing-reason-repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Harvest Test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    contract = _create_sample_contract(
+        task_id="task-failed-missing-reason",
+        workdir=str(repo),
+        base_head=head,
+        allowed_paths=["src/feature.py"],
+        forbidden_paths=["secrets.json"],
+        verification_commands=["python -c pass"],
+        risk_class=RiskClass.LOW,
+        isolated_worktree=True,
+    )
+    manager = DurableRunManager(tmp_path / "failed-missing-reason.sqlite3")
+
+    def failed_worker(_ctx: WorkerContext) -> WorkerResult:
+        (repo / "src" / "feature.py").write_text("VALUE = 2\n", encoding="utf-8")
+        return WorkerResult(success=False, last_error="runner returned no terminal reason")
+
+    record = manager.run_start(contract, worker=failed_worker, worktree=str(repo), repo=str(repo))
+    final = manager.run_wait(record.run_id, timeout=10)
+
+    assert final.state == RunState.FAILED
+    assert final.verification_result["candidate_manifest"]["candidate_discovered"] is True
+    assert final.verification_result["candidate_manifest"]["worker_terminal_reason"] == "FAILED"
+    assert final.verification_result["acceptance"]["task_accepted"] is False
+
+
 def test_healthy_worker_wait_expiry_does_not_harvest_or_duplicate(tmp_path: Path) -> None:
     manager = DurableRunManager(tmp_path / "healthy.sqlite3")
     contract = _create_sample_contract(

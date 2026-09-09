@@ -147,6 +147,7 @@ def build_usage_report_data(
     is_latest_requested: bool = False,
     latest_info: dict[str, Any] | None = None,
     origin: str | EventOrigin | None = None,
+    candidate_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Query ledger and construct structured telemetry report data dictionary with provenance metadata."""
     norm_proj = normalize_project_path(project_dir)
@@ -154,6 +155,16 @@ def build_usage_report_data(
     db_classification = classify_telemetry_db(effective_db_path, origin=origin)
     resolved_origin_enum = resolve_default_origin(origin)
     resolved_origin = resolved_origin_enum.value
+    candidate_payload = dict(candidate_evidence or {})
+    candidate_files = tuple(candidate_payload.get("changed_files") or ())
+    candidate_lines = candidate_payload.get("diff_lines")
+    candidate_has_evidence = bool(candidate_payload.get("candidate_discovered") and candidate_files)
+    candidate_terminal = str(candidate_payload.get("worker_terminal_reason") or "").upper()
+    candidate_transport = str(
+        candidate_payload.get("output_transport_status")
+        or ("FAILED" if candidate_terminal == "FAILED" else ("AVAILABLE" if candidate_has_evidence else "UNAVAILABLE"))
+    )
+    candidate_contribution = 100.0 if candidate_has_evidence else None
 
     if is_latest_requested and latest_info is None:
         # No confirmed production run found
@@ -191,12 +202,25 @@ def build_usage_report_data(
             "summary": summary.to_dict(),
             "codex": {"calls": 0, "monitoring_turns": 0.0, "resumptions": 0},
             "antigravity": {
-                "calls": 0,
-                "duration_seconds": 0.0,
-                "successes": 0,
-                "failures": 0,
-                "changed_files": 0,
-                "lines_of_code": 0,
+                "calls": None,
+                "duration_seconds": None,
+                "successes": None,
+                "failures": None,
+                "changed_files": len(candidate_files) if candidate_has_evidence else None,
+                "lines_of_code": candidate_lines if candidate_has_evidence else None,
+                "recorded_tool_events": 0,
+                "implementation_attribution_source": "CANDIDATE_EVIDENCE" if candidate_has_evidence else "UNAVAILABLE",
+            },
+            "implementation": {
+                "AGY_IMPLEMENTATION_CONTRIBUTION": candidate_contribution,
+                "AGY_TELEMETRY_COVERAGE": "UNAVAILABLE",
+                "AGY_OUTPUT_TRANSPORT_STATUS": candidate_transport,
+                "AGY_RECORDED_CALLS": None,
+                "AGY_RECORDED_TOOL_EVENTS": 0,
+                "AGY_IMPLEMENTATION_CHANGED_FILES": len(candidate_files) if candidate_has_evidence else None,
+                "AGY_IMPLEMENTATION_DIFF_LINES": candidate_lines if candidate_has_evidence else None,
+                "AGY_ATTRIBUTION_SOURCE": "CANDIDATE_EVIDENCE" if candidate_has_evidence else "UNAVAILABLE",
+                "AGY_IMPLEMENTATION_ATTRIBUTION_SOURCE": "CANDIDATE_EVIDENCE" if candidate_has_evidence else "UNAVAILABLE",
             },
             "attribution": {
                 "classification": "DERIVED/ESTIMATED",
@@ -207,16 +231,18 @@ def build_usage_report_data(
                     "No provider-token savings or synthetic cost discount claims are made."
                 ),
                 "measurable_workload": {
-                    "antigravity_duration_seconds": 0.0,
-                    "antigravity_calls": 0,
-                    "antigravity_successes": 0,
-                    "antigravity_failures": 0,
+                    "antigravity_duration_seconds": None,
+                    "antigravity_calls": None,
+                    "antigravity_successes": None,
+                    "antigravity_failures": None,
                     "codex_calls": 0,
                     "codex_monitoring_turns": 0.0,
                     "codex_resumptions": 0,
-                    "changed_files": 0,
-                    "lines_of_code": 0,
+                    "changed_files": len(candidate_files) if candidate_has_evidence else None,
+                    "lines_of_code": candidate_lines if candidate_has_evidence else None,
                 },
+                "implementation_attribution_source": "CANDIDATE_EVIDENCE" if candidate_has_evidence else "UNAVAILABLE",
+                "candidate_evidence": candidate_payload,
             },
             "retries": {"total_count": 0, "events": []},
             "timeouts": {"total_count": 0, "classes": {}, "events": []},
@@ -256,7 +282,7 @@ def build_usage_report_data(
     usage_report_db_classification = db_classification
     usage_report_event_provenance = prov_eval.get("classification", "UNKNOWN_PROVENANCE")
 
-    # Actor totals
+    # Actor totals. Missing AGY telemetry is distinct from an observed zero.
     totals_codex = summary.totals_by_actor.get("codex", {})
     totals_agy = summary.totals_by_actor.get("agy", {})
     totals_bridge = summary.totals_by_actor.get("bridge", {})
@@ -272,6 +298,20 @@ def build_usage_report_data(
     agy_failures = summary.totals_by_measurement_type.get("failure_count", {}).get("count", 0.0)
     agy_files = summary.totals_by_measurement_type.get("changed_files", {}).get("files", 0.0)
     agy_lines = summary.totals_by_measurement_type.get("lines_of_code", {}).get("lines", 0.0)
+    agy_events = [event for event in events if event.actor == "agy"]
+    telemetry_has_evidence = bool(agy_events)
+    implementation_source = (
+        "TELEMETRY" if telemetry_has_evidence else ("CANDIDATE_EVIDENCE" if candidate_has_evidence else "UNAVAILABLE")
+    )
+    if not telemetry_has_evidence:
+        agy_calls = None
+        agy_seconds = None
+        agy_successes = None
+        agy_failures = None
+        agy_files = len(candidate_files) if candidate_has_evidence else None
+        agy_lines = candidate_lines if candidate_has_evidence else None
+    telemetry_coverage = "AVAILABLE" if telemetry_has_evidence else "UNAVAILABLE"
+    implementation_contribution = 100.0 if (telemetry_has_evidence or candidate_has_evidence) else None
 
     # Retries
     retry_events = [e for e in events if e.measurement_type == "retries" or e.event_type == "retry"]
@@ -324,14 +364,14 @@ def build_usage_report_data(
     # Attribution: DERIVED/ESTIMATED strictly on recorded measurable workload
     attribution_workload = {
         "antigravity_duration_seconds": agy_seconds,
-        "antigravity_calls": int(agy_calls),
-        "antigravity_successes": int(agy_successes),
-        "antigravity_failures": int(agy_failures),
+        "antigravity_calls": int(agy_calls) if agy_calls is not None else None,
+        "antigravity_successes": int(agy_successes) if agy_successes is not None else None,
+        "antigravity_failures": int(agy_failures) if agy_failures is not None else None,
         "codex_calls": int(codex_calls),
         "codex_monitoring_turns": codex_turns,
         "codex_resumptions": int(codex_resumptions),
-        "changed_files": int(agy_files),
-        "lines_of_code": int(agy_lines),
+        "changed_files": int(agy_files) if agy_files is not None else None,
+        "lines_of_code": int(agy_lines) if agy_lines is not None else None,
     }
 
     filters_dict: dict[str, Any] = {
@@ -374,22 +414,41 @@ def build_usage_report_data(
             "resumptions": int(codex_resumptions),
         },
         "antigravity": {
-            "calls": int(agy_calls),
+            "calls": int(agy_calls) if agy_calls is not None else None,
             "duration_seconds": agy_seconds,
-            "successes": int(agy_successes),
-            "failures": int(agy_failures),
-            "changed_files": int(agy_files),
-            "lines_of_code": int(agy_lines),
+            "successes": int(agy_successes) if agy_successes is not None else None,
+            "failures": int(agy_failures) if agy_failures is not None else None,
+            "changed_files": int(agy_files) if agy_files is not None else None,
+            "lines_of_code": int(agy_lines) if agy_lines is not None else None,
+            "recorded_tool_events": len(agy_events),
+            "implementation_attribution_source": implementation_source,
+            "implementation_contribution": implementation_contribution,
+            "telemetry_coverage": telemetry_coverage,
+            "output_transport_status": candidate_transport if candidate_has_evidence else ("AVAILABLE" if telemetry_has_evidence else "UNAVAILABLE"),
+        },
+        "implementation": {
+            "AGY_TELEMETRY_CALLS": int(agy_calls) if agy_calls is not None else None,
+            "AGY_RECORDED_CALLS": int(agy_calls) if agy_calls is not None else None,
+            "AGY_RECORDED_TOOL_EVENTS": len(agy_events),
+            "AGY_IMPLEMENTATION_CHANGED_FILES": int(agy_files) if agy_files is not None else None,
+            "AGY_IMPLEMENTATION_DIFF_LINES": int(agy_lines) if agy_lines is not None else None,
+            "AGY_IMPLEMENTATION_CONTRIBUTION": implementation_contribution,
+            "AGY_TELEMETRY_COVERAGE": telemetry_coverage,
+            "AGY_OUTPUT_TRANSPORT_STATUS": candidate_transport if candidate_has_evidence else ("AVAILABLE" if telemetry_has_evidence else "UNAVAILABLE"),
+            "AGY_ATTRIBUTION_SOURCE": implementation_source,
+            "AGY_IMPLEMENTATION_ATTRIBUTION_SOURCE": implementation_source,
         },
         "attribution": {
             "classification": "DERIVED/ESTIMATED",
             "basis": "recorded_measurable_workload",
             "statement": (
-                "Workload attribution is DERIVED/ESTIMATED solely from recorded measurable workload "
-                "(execution duration, calls, monitoring turns, diffs). "
+                "Implementation attribution uses recorded AGY telemetry when available, otherwise bounded candidate evidence; "
+                "missing evidence remains UNAVAILABLE. "
                 "No provider-token savings or synthetic cost discount claims are made."
             ),
             "measurable_workload": attribution_workload,
+            "implementation_attribution_source": implementation_source,
+            "candidate_evidence": dict(candidate_evidence or {}),
         },
         "retries": {
             "total_count": retries_count,
@@ -487,10 +546,14 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     a_fail = agy.get("failures", 0)
     a_files = agy.get("changed_files", 0)
     a_lines = agy.get("lines_of_code", 0)
-    lines.append(f"  Calls / Launches:    {a_calls} calls")
-    lines.append(f"  Execution Duration:  {a_secs:.2f} seconds")
-    lines.append(f"  Outcomes:            {a_succ} successes, {a_fail} failures")
-    lines.append(f"  Worktree Diffs:      {a_files} changed files, {a_lines} lines of code")
+    implementation_source = agy.get("implementation_attribution_source", "UNAVAILABLE")
+    def display(value: Any) -> str:
+        return "UNAVAILABLE" if value is None else str(value)
+    lines.append(f"  Calls / Launches:    {display(a_calls)} calls")
+    lines.append(f"  Execution Duration:  {display(a_secs)} seconds")
+    lines.append(f"  Outcomes:            {display(a_succ)} successes, {display(a_fail)} failures")
+    lines.append(f"  Worktree Diffs:      {display(a_files)} changed files, {display(a_lines)} lines of code")
+    lines.append(f"  Implementation Source: {implementation_source}")
     lines.append("")
 
     # 4. MEASUREMENTS
@@ -508,7 +571,7 @@ def format_human_report(report_data: dict[str, Any]) -> str:
     # 5. ATTRIBUTION
     lines.append("ATTRIBUTION:           [DERIVED/ESTIMATED]")
     lines.append(
-        f"  Workload Breakdown:  Antigravity executed {a_secs:.2f}s across {a_calls} calls; "
+        f"  Workload Breakdown:  Antigravity executed {display(a_secs)}s across {display(a_calls)} calls; "
         f"Codex monitored with {c_turns:.2f} turns."
     )
     lines.append("  Workload Basis:      Derived strictly from recorded measurable workload (duration, calls, turns, LOC).")

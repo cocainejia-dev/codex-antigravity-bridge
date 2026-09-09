@@ -227,6 +227,84 @@ def test_json_output_deterministic_and_separate_units(tmp_path: Path, capsys: py
     assert captured == captured2
 
 
+def test_missing_agy_telemetry_uses_candidate_evidence_without_fake_zero(tmp_path: Path):
+    ledger = get_telemetry_ledger(tmp_path / "candidate-only.sqlite3")
+    ledger.record_event(
+        actor="codex",
+        event_type="run_start",
+        measurement_type="call",
+        value=1,
+        unit="calls",
+    )
+    report = build_usage_report_data(
+        ledger=ledger,
+        run_id=None,
+        candidate_evidence={
+            "candidate_discovered": True,
+            "changed_files": ["src/a.py"],
+            "diff_lines": 4,
+            "worker_terminal_reason": "FAILED",
+        },
+    )
+    assert report["antigravity"]["calls"] is None
+    assert report["antigravity"]["changed_files"] == 1
+    assert report["antigravity"]["implementation_attribution_source"] == "CANDIDATE_EVIDENCE"
+    assert report["implementation"]["AGY_TELEMETRY_CALLS"] is None
+    assert report["implementation"]["AGY_IMPLEMENTATION_CHANGED_FILES"] == 1
+    assert report["implementation"]["AGY_IMPLEMENTATION_DIFF_LINES"] == 4
+    assert report["implementation"]["AGY_IMPLEMENTATION_CONTRIBUTION"] == 100.0
+    assert report["implementation"]["AGY_TELEMETRY_COVERAGE"] == "UNAVAILABLE"
+    assert report["implementation"]["AGY_OUTPUT_TRANSPORT_STATUS"] == "FAILED"
+    assert report["implementation"]["AGY_ATTRIBUTION_SOURCE"] == "CANDIDATE_EVIDENCE"
+
+
+def test_no_telemetry_and_no_candidate_is_unavailable(tmp_path: Path):
+    ledger = get_telemetry_ledger(tmp_path / "empty-attribution.sqlite3")
+    report = build_usage_report_data(ledger=ledger)
+    assert report["antigravity"]["calls"] is None
+    assert report["antigravity"]["changed_files"] is None
+    assert report["antigravity"]["implementation_attribution_source"] == "UNAVAILABLE"
+    assert report["implementation"]["AGY_IMPLEMENTATION_ATTRIBUTION_SOURCE"] == "UNAVAILABLE"
+    assert report["implementation"]["AGY_IMPLEMENTATION_CONTRIBUTION"] is None
+    assert report["implementation"]["AGY_TELEMETRY_COVERAGE"] == "UNAVAILABLE"
+
+
+def test_latest_without_telemetry_preserves_candidate_evidence(tmp_path: Path):
+    ledger = get_telemetry_ledger(tmp_path / "latest-candidate.sqlite3")
+    report = build_usage_report_data(
+        ledger=ledger,
+        is_latest_requested=True,
+        latest_info=None,
+        candidate_evidence={
+            "candidate_discovered": True,
+            "changed_files": ["src/a.py"],
+            "diff_lines": 3,
+            "worker_terminal_reason": "FAILED",
+        },
+    )
+    assert report["antigravity"]["changed_files"] == 1
+    assert report["implementation"]["AGY_IMPLEMENTATION_CONTRIBUTION"] == 100.0
+    assert report["implementation"]["AGY_ATTRIBUTION_SOURCE"] == "CANDIDATE_EVIDENCE"
+    assert report["attribution"]["measurable_workload"]["changed_files"] == 1
+
+
+def test_telemetry_and_candidate_evidence_are_not_double_counted(tmp_path: Path):
+    ledger = get_telemetry_ledger(tmp_path / "telemetry-and-candidate.sqlite3")
+    ledger.record_event(
+        actor="agy",
+        event_type="completion",
+        measurement_type="changed_files",
+        value=2,
+        unit="files",
+    )
+    report = build_usage_report_data(
+        ledger=ledger,
+        candidate_evidence={"candidate_discovered": True, "changed_files": ["src/a.py"]},
+    )
+    assert report["implementation"]["AGY_IMPLEMENTATION_CHANGED_FILES"] == 2
+    assert report["implementation"]["AGY_IMPLEMENTATION_ATTRIBUTION_SOURCE"] == "TELEMETRY"
+
+
 def test_filtering_per_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     """Verify filtering by --run restricts data to the targeted run_id."""
     db_path = tmp_path / "test_run_filter.sqlite3"

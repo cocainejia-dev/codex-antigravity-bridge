@@ -180,6 +180,18 @@ def test_callback_maps_runner_failure(monkeypatch):
 
     assert result.success is False
     assert result.last_error == "provider failed"
+    assert result.terminal_reason == "FAILED"
+
+
+def test_callback_maps_runner_exception_to_failed_terminal():
+    def raising_runner(*args, **kwargs):
+        raise RuntimeError("pty transport unavailable")
+
+    result = build_worker_callback(_contract(), runner=raising_runner)(_context(_contract()))
+
+    assert result.success is False
+    assert result.terminal_reason == "FAILED"
+    assert result.last_error == "pty transport unavailable"
 
 
 def test_callback_maps_explicit_quota_exhaustion_to_account_switch():

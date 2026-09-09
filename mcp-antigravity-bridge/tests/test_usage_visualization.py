@@ -422,3 +422,39 @@ def test_call_share_semantics_and_zero_calls():
     assert "Codex 调用占比 (25.0%)" in html_unequal
     # Strictly DERIVED, no provider token claims
     assert "不作任何模型提供商 Token 节省或虚假成本折扣断言" in html_unequal
+
+
+def test_html_candidate_attribution_does_not_render_unknown_as_zero():
+    report_data = {
+        "filters": {},
+        "summary": {},
+        "codex": {"calls": 0, "monitoring_turns": 0.0},
+        "antigravity": {
+            "calls": None,
+            "duration_seconds": None,
+            "successes": None,
+            "failures": None,
+            "changed_files": 1,
+            "lines_of_code": 4,
+            "implementation_attribution_source": "CANDIDATE_EVIDENCE",
+        },
+        "implementation": {
+            "AGY_IMPLEMENTATION_CONTRIBUTION": 100.0,
+            "AGY_TELEMETRY_COVERAGE": "UNAVAILABLE",
+            "AGY_OUTPUT_TRANSPORT_STATUS": "FAILED",
+            "AGY_ATTRIBUTION_SOURCE": "CANDIDATE_EVIDENCE",
+        },
+        "attribution": {"statement": "candidate evidence"},
+        "retries": {"total_count": 0, "events": []},
+        "timeouts": {"total_count": 0, "classes": {}, "events": []},
+        "account_switches": {"total_count": 0, "events": []},
+        "duplicate_quota_metrics": {"risk_count": 0, "avoided_count": 0, "source": "DERIVED"},
+        "confidence": {"mean_confidence": 1.0, "weighted_confidence_by_unit": {}},
+        "sources": {"events_by_source": {}},
+        "events": [],
+    }
+    html_out = generate_html_report(report_data)
+    assert "CANDIDATE_EVIDENCE" in html_out
+    assert "UNAVAILABLE" in html_out
+    assert "FAILED" in html_out
+    assert "实现贡献" in html_out
