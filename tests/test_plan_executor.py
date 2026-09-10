@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -187,6 +188,47 @@ def test_git_read_fails_after_bounded_retry(monkeypatch) -> None:
     else:
         raise AssertionError("repeated read timeout must remain a failure")
     assert calls == 2
+
+
+def test_synthetic_external_worker_serial_plan(tmp_path: Path) -> None:
+    """SYNTHETIC: exercise the serial plan with a real local child process per task."""
+    repo, head = _repo(tmp_path)
+    db = tmp_path / "synthetic-external.sqlite3"
+    starts: list[str] = []
+    targets = {"t1": "a.txt", "t2": "b.txt", "t3": "c.txt"}
+
+    def factory(contract):
+        def worker(_ctx):
+            starts.append(contract.task_id)
+            target = repo / targets[contract.task_id]
+            code = (
+                "from pathlib import Path; "
+                f"Path({str(target)!r}).write_text({contract.task_id!r}, encoding='utf-8')"
+            )
+            subprocess.run([sys.executable, "-c", code], check=True, timeout=5)
+            return WorkerResult(
+                success=True,
+                candidate=True,
+                verification_result={"passed": True},
+                result_summary="synthetic-external-worker",
+                terminal_reason="COMPLETED",
+            )
+
+        return worker
+
+    executor = PlanExecutor(db, worker_factory=factory)
+    executor.start(
+        _plan(repo, head),
+        integration_worktree=str(repo),
+        initial_base_head=head,
+        execution_id="exec-synthetic-external",
+    )
+    result = executor.wait("exec-synthetic-external", timeout=20)
+
+    assert result.state == PlanExecutionState.COMPLETE
+    assert starts == ["t1", "t2", "t3"]
+    assert result.tasks["t2"]["resolved_base_head"] == result.tasks["t1"]["accepted_checkpoint_sha"]
+    assert all((repo / target).exists() for target in targets.values())
 
 
 def test_start_is_idempotent_and_high_risk_requires_authorization(tmp_path: Path) -> None:
