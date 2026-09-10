@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from codex_agy_bridge.plan_executor import (
@@ -197,6 +198,152 @@ def test_git_read_fails_after_bounded_retry(monkeypatch) -> None:
     else:
         raise AssertionError("repeated read timeout must remain a failure")
     assert calls == 2
+
+
+def test_checkpoint_timeout_is_resumable_without_replaying_accepted_child(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo, head = _repo(tmp_path)
+    db = tmp_path / "plan.sqlite3"
+    starts: list[str] = []
+    real_run = subprocess.run
+    remaining_timeouts = 2
+
+    def flaky_run(command, *args, **kwargs):
+        nonlocal remaining_timeouts
+        if (
+            remaining_timeouts
+            and command[:2] == ["git", "-C"]
+            and command[-2:] == ["rev-parse", "HEAD"]
+        ):
+            remaining_timeouts -= 1
+            raise subprocess.TimeoutExpired(command, timeout=15)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", flaky_run)
+
+    def factory(contract):
+        def worker(_ctx):
+            starts.append(contract.task_id)
+            target = {"t1": "a.txt", "t2": "b.txt", "t3": "c.txt"}[
+                contract.task_id
+            ]
+            (repo / target).write_text(contract.task_id, encoding="utf-8")
+            return WorkerResult(
+                success=True,
+                candidate=True,
+                verification_result={"passed": True},
+                result_summary="checkpoint-resume",
+                terminal_reason="COMPLETED",
+            )
+
+        return worker
+
+    executor = PlanExecutor(db, worker_factory=factory)
+    executor.start(
+        _plan(repo, head),
+        integration_worktree=str(repo),
+        initial_base_head=head,
+        execution_id="exec-checkpoint-resume",
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        interrupted = executor.status("exec-checkpoint-resume")
+        if interrupted.state == PlanExecutionState.INTERRUPTED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("plan did not preserve the checkpoint timeout")
+
+    assert starts == ["t1"]
+    assert interrupted.tasks["t1"]["child_run_state"] == "COMPLETE"
+    child_id = interrupted.tasks["t1"]["child_run_id"]
+    executor._threads["exec-checkpoint-resume"].join(timeout=1)
+
+    restarted = PlanExecutor(db, worker_factory=factory)
+    restarted.resume("exec-checkpoint-resume")
+    result = restarted.wait("exec-checkpoint-resume", timeout=15)
+
+    assert result.state == PlanExecutionState.COMPLETE
+    assert starts == ["t1", "t2", "t3"]
+    assert result.tasks["t1"]["child_run_id"] == child_id
+    assert result.tasks["t1"]["execution_state"] == PlanTaskState.ACCEPTED.value
+
+
+def test_checkpoint_commit_timeout_reconciles_head_without_duplicate_commit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo, head = _repo(tmp_path)
+    db = tmp_path / "plan.sqlite3"
+    starts: list[str] = []
+    real_run = subprocess.run
+    lost_commit_result = False
+
+    def commit_then_timeout(command, *args, **kwargs):
+        nonlocal lost_commit_result
+        if (
+            not lost_commit_result
+            and command[:3] == ["git", "-C", str(repo)]
+            and "commit" in command
+        ):
+            lost_commit_result = True
+            real_run(command, *args, **kwargs)
+            raise subprocess.TimeoutExpired(command, timeout=30)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", commit_then_timeout)
+
+    def factory(contract):
+        def worker(_ctx):
+            starts.append(contract.task_id)
+            target = {"t1": "a.txt", "t2": "b.txt", "t3": "c.txt"}[
+                contract.task_id
+            ]
+            (repo / target).write_text(contract.task_id, encoding="utf-8")
+            return WorkerResult(
+                success=True,
+                candidate=True,
+                verification_result={"passed": True},
+                result_summary="commit-timeout-reconcile",
+                terminal_reason="COMPLETED",
+            )
+
+        return worker
+
+    executor = PlanExecutor(db, worker_factory=factory)
+    executor.start(
+        _plan(repo, head),
+        integration_worktree=str(repo),
+        initial_base_head=head,
+        execution_id="exec-commit-timeout",
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        interrupted = executor.status("exec-commit-timeout")
+        if interrupted.state == PlanExecutionState.INTERRUPTED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("plan did not preserve the commit timeout")
+
+    committed_t1_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    assert committed_t1_head != head
+    assert starts == ["t1"]
+    executor._threads["exec-commit-timeout"].join(timeout=1)
+
+    restarted = PlanExecutor(db, worker_factory=factory)
+    restarted.resume("exec-commit-timeout")
+    result = restarted.wait("exec-commit-timeout", timeout=15)
+
+    subjects = subprocess.check_output(
+        ["git", "log", "--format=%s"], cwd=repo, text=True
+    ).splitlines()
+    assert result.state == PlanExecutionState.COMPLETE
+    assert starts == ["t1", "t2", "t3"]
+    assert result.tasks["t1"]["accepted_checkpoint_sha"] == committed_t1_head
+    assert subjects.count("agy-plan-checkpoint: exec-commit-timeout t1") == 1
 
 
 def test_synthetic_external_worker_serial_plan(tmp_path: Path) -> None:

@@ -442,9 +442,29 @@ class PlanExecutor:
         except Exception as exc:
             record = self.store.get(execution_id)
             if record:
-                record.state = PlanExecutionState.FAILED
+                active_task = (
+                    record.tasks.get(record.active_task_id)
+                    if record.active_task_id
+                    else None
+                )
+                checkpoint_timeout = (
+                    isinstance(exc, subprocess.TimeoutExpired)
+                    and active_task is not None
+                    and active_task.get("child_run_state") == RunState.COMPLETE.value
+                )
+                record.state = (
+                    PlanExecutionState.INTERRUPTED
+                    if checkpoint_timeout
+                    else PlanExecutionState.FAILED
+                )
                 record.last_error = str(exc)
-                record.terminal_reason = "PLAN_EXECUTION_ERROR"
+                record.terminal_reason = (
+                    "CHECKPOINT_GIT_TIMEOUT"
+                    if checkpoint_timeout
+                    else "PLAN_EXECUTION_ERROR"
+                )
+                if checkpoint_timeout:
+                    active_task["last_error"] = str(exc)
                 self.store.save(record)
         finally:
             execution_lock.release()
@@ -533,6 +553,7 @@ class PlanExecutor:
             manager.run_start(contract, **start_kwargs)
         child = self._supervise_child(manager, child_id)
         task_state["child_run_state"] = child.state.value
+        self.store.save(record)
         if child.state != RunState.COMPLETE:
             task_state["execution_state"] = PlanTaskState.FAILED.value
             task_state["last_error"] = child.last_error or child.state.value
