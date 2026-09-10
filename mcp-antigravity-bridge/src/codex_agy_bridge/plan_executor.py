@@ -64,7 +64,11 @@ def _now() -> str:
 
 def _git(worktree: str, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", worktree, *args], capture_output=True, text=True, timeout=15
+        ["git", "-C", worktree, *args],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        timeout=15,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
@@ -598,6 +602,7 @@ class PlanExecutor:
                 ],
                 check=True,
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 timeout=30,
             )

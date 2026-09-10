@@ -155,6 +155,18 @@ def test_git_read_retries_once_then_succeeds(monkeypatch) -> None:
     assert calls == 2
 
 
+def test_git_checkpoint_commands_close_stdin(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(_command, **kwargs):
+        captured["stdin"] = kwargs["stdin"]
+        return subprocess.CompletedProcess("git", 0, stdout="abc\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert _git_read("repo", "rev-parse", "HEAD") == "abc"
+    assert captured["stdin"] is subprocess.DEVNULL
+
+
 def test_git_write_does_not_retry_after_timeout(monkeypatch) -> None:
     calls = 0
 
