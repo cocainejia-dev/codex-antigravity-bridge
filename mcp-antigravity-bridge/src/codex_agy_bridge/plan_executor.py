@@ -62,20 +62,24 @@ def _now() -> str:
 
 
 def _git(worktree: str, *args: str) -> str:
-    command = ["git", "-C", worktree, *args]
+    result = subprocess.run(
+        ["git", "-C", worktree, *args], capture_output=True, text=True, timeout=15
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result.stdout.strip()
+
+
+def _git_read(worktree: str, *args: str) -> str:
+    """Run a read-only Git probe with one bounded retry after a transient timeout."""
     for attempt in range(2):
         try:
-            result = subprocess.run(
-                command, capture_output=True, text=True, timeout=15
-            )
-            break
+            return _git(worktree, *args)
         except subprocess.TimeoutExpired:
             if attempt == 1:
                 raise
             time.sleep(0.1)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
-    return result.stdout.strip()
+    raise AssertionError("unreachable")
 
 
 def _plan_from_dict(raw: dict[str, Any]) -> TaskPlan:
@@ -555,8 +559,8 @@ class PlanExecutor:
             record.active_run_id = None
             self.store.save(record)
             return
-        checkpoint = _git(record.integration_worktree, "rev-parse", "HEAD")
-        dirty = _git(record.integration_worktree, "status", "--porcelain")
+        checkpoint = _git_read(record.integration_worktree, "rev-parse", "HEAD")
+        dirty = _git_read(record.integration_worktree, "status", "--porcelain")
         if dirty:
             _git(record.integration_worktree, "add", "--", *shaped.allowed_paths)
             subprocess.run(
@@ -573,7 +577,7 @@ class PlanExecutor:
                 text=True,
                 timeout=30,
             )
-            checkpoint = _git(record.integration_worktree, "rev-parse", "HEAD")
+            checkpoint = _git_read(record.integration_worktree, "rev-parse", "HEAD")
         task_state["execution_state"] = PlanTaskState.ACCEPTED.value
         task_state["accepted_checkpoint_sha"] = checkpoint
         record.current_accepted_head = checkpoint

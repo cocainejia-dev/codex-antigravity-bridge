@@ -9,6 +9,8 @@ from codex_agy_bridge.plan_executor import (
     PlanExecutionState,
     PlanExecutor,
     PlanTaskState,
+    _git,
+    _git_read,
 )
 from codex_agy_bridge.run_control import WorkerResult
 from codex_agy_bridge.task_shaping import shape_task
@@ -134,6 +136,57 @@ def test_checkpoint_git_timeout_retries_without_replaying_worker(tmp_path: Path,
     result = executor.wait("exec-timeout-retry", timeout=15)
     assert result.state == PlanExecutionState.COMPLETE
     assert starts == ["t1", "t2", "t3"]
+
+
+def test_git_read_retries_once_then_succeeds(monkeypatch) -> None:
+    calls = 0
+
+    def flaky_run(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise subprocess.TimeoutExpired("git", timeout=15)
+        return subprocess.CompletedProcess("git", 0, stdout="abc\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", flaky_run)
+    assert _git_read("repo", "rev-parse", "HEAD") == "abc"
+    assert calls == 2
+
+
+def test_git_write_does_not_retry_after_timeout(monkeypatch) -> None:
+    calls = 0
+
+    def stalled_run(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired("git", timeout=15)
+
+    monkeypatch.setattr(subprocess, "run", stalled_run)
+    try:
+        _git("repo", "add", "--", "file.txt")
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("write timeout must be propagated")
+    assert calls == 1
+
+
+def test_git_read_fails_after_bounded_retry(monkeypatch) -> None:
+    calls = 0
+
+    def stalled_run(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired("git", timeout=15)
+
+    monkeypatch.setattr(subprocess, "run", stalled_run)
+    try:
+        _git_read("repo", "status", "--porcelain")
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("repeated read timeout must remain a failure")
+    assert calls == 2
 
 
 def test_start_is_idempotent_and_high_risk_requires_authorization(tmp_path: Path) -> None:
