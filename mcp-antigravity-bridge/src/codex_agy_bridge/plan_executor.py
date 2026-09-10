@@ -55,6 +55,7 @@ TERMINAL_PLAN_STATES = {
 
 _EXECUTION_LOCKS: dict[str, threading.Lock] = {}
 _EXECUTION_LOCKS_GUARD = threading.Lock()
+_READ_ONLY_GIT_COMMANDS = frozenset({"rev-parse", "status"})
 
 
 def _now() -> str:
@@ -72,6 +73,8 @@ def _git(worktree: str, *args: str) -> str:
 
 def _git_read(worktree: str, *args: str) -> str:
     """Run a read-only Git probe with one bounded retry after a transient timeout."""
+    if not args or args[0] not in _READ_ONLY_GIT_COMMANDS:
+        raise ValueError("_git_read only permits read-only Git commands")
     for attempt in range(2):
         try:
             return _git(worktree, *args)

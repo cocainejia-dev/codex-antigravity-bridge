@@ -172,6 +172,15 @@ def test_git_write_does_not_retry_after_timeout(monkeypatch) -> None:
     assert calls == 1
 
 
+def test_git_read_rejects_write_command() -> None:
+    try:
+        _git_read("repo", "add", "--", "file.txt")
+    except ValueError as exc:
+        assert "read-only" in str(exc)
+    else:
+        raise AssertionError("_git_read must reject write commands")
+
+
 def test_git_read_fails_after_bounded_retry(monkeypatch) -> None:
     calls = 0
 
