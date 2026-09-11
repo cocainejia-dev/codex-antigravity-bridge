@@ -55,6 +55,7 @@ TERMINAL_PLAN_STATES = {
 
 _EXECUTION_LOCKS: dict[str, threading.Lock] = {}
 _EXECUTION_LOCKS_GUARD = threading.Lock()
+_READ_ONLY_GIT_COMMANDS = frozenset({"rev-parse", "status"})
 
 
 def _now() -> str:
@@ -63,11 +64,29 @@ def _now() -> str:
 
 def _git(worktree: str, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", worktree, *args], capture_output=True, text=True, timeout=15
+        ["git", "-C", worktree, *args],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        timeout=15,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
+
+
+def _git_read(worktree: str, *args: str) -> str:
+    """Run a read-only Git probe with one bounded retry after a transient timeout."""
+    if not args or args[0] not in _READ_ONLY_GIT_COMMANDS:
+        raise ValueError("_git_read only permits read-only Git commands")
+    for attempt in range(2):
+        try:
+            return _git(worktree, *args)
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise
+            time.sleep(0.1)
+    raise AssertionError("unreachable")
 
 
 def _plan_from_dict(raw: dict[str, Any]) -> TaskPlan:
@@ -427,9 +446,29 @@ class PlanExecutor:
         except Exception as exc:
             record = self.store.get(execution_id)
             if record:
-                record.state = PlanExecutionState.FAILED
+                active_task = (
+                    record.tasks.get(record.active_task_id)
+                    if record.active_task_id
+                    else None
+                )
+                checkpoint_timeout = (
+                    isinstance(exc, subprocess.TimeoutExpired)
+                    and active_task is not None
+                    and active_task.get("child_run_state") == RunState.COMPLETE.value
+                )
+                record.state = (
+                    PlanExecutionState.INTERRUPTED
+                    if checkpoint_timeout
+                    else PlanExecutionState.FAILED
+                )
                 record.last_error = str(exc)
-                record.terminal_reason = "PLAN_EXECUTION_ERROR"
+                record.terminal_reason = (
+                    "CHECKPOINT_GIT_TIMEOUT"
+                    if checkpoint_timeout
+                    else "PLAN_EXECUTION_ERROR"
+                )
+                if checkpoint_timeout:
+                    active_task["last_error"] = str(exc)
                 self.store.save(record)
         finally:
             execution_lock.release()
@@ -518,6 +557,7 @@ class PlanExecutor:
             manager.run_start(contract, **start_kwargs)
         child = self._supervise_child(manager, child_id)
         task_state["child_run_state"] = child.state.value
+        self.store.save(record)
         if child.state != RunState.COMPLETE:
             task_state["execution_state"] = PlanTaskState.FAILED.value
             task_state["last_error"] = child.last_error or child.state.value
@@ -547,8 +587,8 @@ class PlanExecutor:
             record.active_run_id = None
             self.store.save(record)
             return
-        checkpoint = _git(record.integration_worktree, "rev-parse", "HEAD")
-        dirty = _git(record.integration_worktree, "status", "--porcelain")
+        checkpoint = _git_read(record.integration_worktree, "rev-parse", "HEAD")
+        dirty = _git_read(record.integration_worktree, "status", "--porcelain")
         if dirty:
             _git(record.integration_worktree, "add", "--", *shaped.allowed_paths)
             subprocess.run(
@@ -562,10 +602,11 @@ class PlanExecutor:
                 ],
                 check=True,
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 timeout=30,
             )
-            checkpoint = _git(record.integration_worktree, "rev-parse", "HEAD")
+            checkpoint = _git_read(record.integration_worktree, "rev-parse", "HEAD")
         task_state["execution_state"] = PlanTaskState.ACCEPTED.value
         task_state["accepted_checkpoint_sha"] = checkpoint
         record.current_accepted_head = checkpoint
