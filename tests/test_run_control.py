@@ -596,6 +596,18 @@ def test_heartbeat_updates(tmp_path: Path) -> None:
     assert updated.updated_at >= record.updated_at
 
 
+def test_reconnectable_run_events_survive_fresh_manager(tmp_path: Path) -> None:
+    db_file = tmp_path / "events.sqlite3"
+    manager = DurableRunManager(db_file)
+    contract = _create_sample_contract(task_id="task-events-01")
+    record = manager.run_start(contract, auto_spawn=False)
+    manager.store.append_event(record.run_id, "progress", "worker_started", {"phase": "execution"})
+
+    fresh = DurableRunManager(db_file)
+    events = fresh.store.list_events(record.run_id)
+    assert events[-1]["kind"] == "progress"
+    assert events[-1]["message"] == "worker_started"
+    assert events[-1]["details"] == {"phase": "execution"}
 def test_is_pid_alive_helper() -> None:
     """Verify is_pid_alive works for current pid and non-existent pid."""
     current_pid = os.getpid()
