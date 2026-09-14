@@ -15,12 +15,14 @@ Reference implementations:
 from __future__ import annotations
 
 import math
+import io
 import os
 import re
 import select
 import shutil
 import socket
 import subprocess
+import queue
 import sys
 import threading
 import time
@@ -487,6 +489,7 @@ def run_agy(
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
     print_timeout: Optional[float] = None,
+    output_callback: Callable[[str], None] | None = None,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -531,6 +534,10 @@ def run_agy(
             "stall_grace_seconds": stall_grace_seconds,
             "max_liveness_extensions": max_liveness_extensions,
         }
+    if output_callback is not None:
+        runner_options["output_callback"] = output_callback
+    if output_callback is not None:
+        runner_options["output_callback"] = output_callback
     direct = _run_subprocess(args, launch_workdir, timeout, environment, **runner_options)
     direct_text = clean_agy_output(direct.stdout)
     direct_stderr = clean_agy_output(direct.stderr)
@@ -647,6 +654,7 @@ def _run_subprocess(
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    output_callback: Callable[[str], None] | None = None,
 ) -> subprocess.CompletedProcess:
     kwargs: dict = {"cwd": workdir, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if env is not None:
@@ -654,6 +662,32 @@ def _run_subprocess(
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
     proc = subprocess.Popen(args, **kwargs)
+    if not isinstance(proc.stdout, io.TextIOBase) or not isinstance(proc.stderr, io.TextIOBase):
+        deadline = time.monotonic() + timeout
+        extensions = 0
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=max(0.001, deadline - time.monotonic()))
+                return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                if extensions >= max_liveness_extensions or liveness_probe is None or not liveness_probe():
+                    proc.kill()
+                    raise LocalSupervisionTimeoutError(f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s")
+                extensions += 1
+                deadline = time.monotonic() + stall_grace_seconds
+    output_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+    def _reader(label: str, stream) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                if line:
+                    output_queue.put((label, line))
+        finally:
+            stream.close()
+    readers = [threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True), threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True)]
+    for reader in readers:
+        reader.start()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
     deadline = time.monotonic() + timeout
     extensions = 0
     try:
@@ -671,10 +705,22 @@ def _run_subprocess(
                 extensions += 1
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
+            if proc.poll() is not None and all(not reader.is_alive() for reader in readers):
+                    while True:
+                        try:
+                            chunk = output_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        label, chunk = chunk
+                        (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
+                    stdout = "".join(stdout_chunks)
+                    return subprocess.CompletedProcess(args, proc.returncode, stdout, "".join(stderr_chunks))
             try:
-                stdout, stderr = proc.communicate(timeout=min(1.0, remaining))
-                return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
+                label, chunk = output_queue.get(timeout=min(0.2, remaining))
+                (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
+                if output_callback:
+                    output_callback(chunk)
+            except queue.Empty:
                 continue
     except (TimeoutError, LocalSupervisionTimeoutError):
         proc.kill()
@@ -693,6 +739,7 @@ def _run_with_pty(
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    output_callback: Callable[[str], None] | None = None,
 ) -> tuple[str, int]:
     """Run agy attached to a fresh pty so it believes stdout is a terminal."""
     if sys.platform == "win32":
@@ -704,6 +751,7 @@ def _run_with_pty(
             liveness_probe,
             stall_grace_seconds,
             max_liveness_extensions,
+            output_callback,
         )
     return _run_with_posix_pty(
         args,
@@ -713,6 +761,7 @@ def _run_with_pty(
         liveness_probe,
         stall_grace_seconds,
         max_liveness_extensions,
+        output_callback,
     )
 
 
@@ -724,6 +773,7 @@ def _run_with_conpty(
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    output_callback: Callable[[str], None] | None = None,
 ) -> tuple[str, int]:
     try:
         from winpty import PtyProcess  # type: ignore
@@ -775,6 +825,8 @@ def _run_with_conpty(
                 completed = True
                 break
             chunks.append(chunk)
+            if output_callback:
+                output_callback(chunk)
     finally:
         if not completed and proc.isalive():
             proc.terminate(force=True)
@@ -796,6 +848,7 @@ def _run_with_posix_pty(
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    output_callback: Callable[[str], None] | None = None,
 ) -> tuple[str, int]:
     import pty
 
@@ -840,7 +893,10 @@ def _run_with_posix_pty(
                     break
                 if not data:
                     break
-                chunks.append(data.decode("utf-8", errors="replace"))
+                chunk = data.decode("utf-8", errors="replace")
+                chunks.append(chunk)
+                if output_callback:
+                    output_callback(chunk)
             elif proc.poll() is not None:
                 break
     finally:

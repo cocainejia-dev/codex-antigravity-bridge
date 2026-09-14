@@ -195,6 +195,16 @@ class WorkerContext:
         """Send a heartbeat signal to durable storage."""
         self.heartbeat_callback()
 
+    def emit_event(self, kind: str, message: str, details: dict[str, Any] | None = None) -> None:
+        """Publish bounded progress without coupling workers to MCP transport."""
+        callback = self.extra.get("event_callback")
+        if callback is not None:
+            try:
+                callback(kind, message, details)
+            except Exception:
+                # Progress telemetry must never change worker outcome.
+                pass
+
 
 WorkerCallback = Callable[[WorkerContext], Optional[WorkerResult]]
 
@@ -290,6 +300,20 @@ class DurableRunStore:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS run_events (
+                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        details_json TEXT,
+                        FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                    );
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, event_id);")
             finally:
                 conn.close()
 
@@ -324,6 +348,40 @@ class DurableRunStore:
             last_error=row["last_error"],
             suspended_reason=row["suspended_reason"],
         )
+
+    def append_event(self, run_id: str, kind: str, message: str, details: dict[str, Any] | None = None) -> None:
+        """Persist a bounded, reconnectable progress event for a durable run."""
+        if not run_id or not kind or not message:
+            raise ValueError("run_id, kind, and message are required")
+        validate_no_credentials(message, "event.message")
+        if details is not None:
+            validate_no_credentials(details, "event.details")
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO run_events(run_id, created_at, kind, message, details_json) VALUES (?, ?, ?, ?, ?)",
+                    (run_id, _utc_now_iso(), kind, message[:4000], json.dumps(details, ensure_ascii=False) if details is not None else None),
+                )
+            finally:
+                conn.close()
+
+    def list_events(self, run_id: str, after_event_id: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        """Return persisted progress events for reconnecting supervisors."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT event_id, created_at, kind, message, details_json FROM run_events WHERE run_id = ? AND event_id > ? ORDER BY event_id LIMIT ?",
+                    (run_id, max(0, int(after_event_id)), max(1, min(int(limit), 500))),
+                ).fetchall()
+            finally:
+                conn.close()
+        result = []
+        for row in rows:
+            details = json.loads(row["details_json"]) if row["details_json"] else None
+            result.append({"event_id": row["event_id"], "created_at": row["created_at"], "kind": row["kind"], "message": row["message"], "details": details})
+        return result
 
     def insert_run(
         self,
@@ -675,6 +733,10 @@ class DurableRunStore:
                     raise ConcurrentModificationError(
                         f"Concurrent modification detected when transitioning run {run_id} at version {expected_version}"
                     )
+                conn.execute(
+                    "INSERT INTO run_events(run_id, created_at, kind, message, details_json) VALUES (?, ?, ?, ?, ?)",
+                    (run_id, current_record.updated_at, "state", f"state={current_record.state.value}", json.dumps({"state_version": current_record.state_version}, ensure_ascii=False)),
+                )
             finally:
                 conn.close()
 
@@ -908,6 +970,7 @@ class DurableRunManager:
             idempotency_key=idempotency_key,
             worker_identity=resolved_worker_identity,
         )
+        self.store.append_event(persisted_record.run_id, "lifecycle", "run_created", {"task_id": contract.task_id, "launch_mode": launch_mode})
 
         try:
             from .telemetry_hooks import record_run_start_event, telemetry_path_for
@@ -1056,6 +1119,7 @@ class DurableRunManager:
                     heartbeat_callback=lambda: self.store.update_heartbeat(run_id),
                     record=running_record,
                     worktree=worktree or contract.workdir,
+                    extra={"event_callback": lambda kind, message, details=None: self.store.append_event(run_id, kind, message, details)},
                 )
 
                 # Execute injectable worker with duration measurement

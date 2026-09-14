@@ -248,6 +248,10 @@ Windows 手动配置 MCP 时，请把 `command` 写成真实 Python 可执行文
 运行时 SQLite、日志、PID、心跳、覆盖率缓存和临时 worktree 都是本机动态
 状态，已被 `.gitignore` 排除，不得提交或公开。重试中断任务前，先只读运行：
 
+如果 Codex 对话因网络问题结束，保留启动时返回的 `db_path` 和 `run_id`。新对话中先调用
+`run_observe` 判断 worker 是否仍存活，再调用 `run_events` 读取断线期间的增量进度，最后用
+`run_wait` 或 `run_result` 继续监督同一个运行。不要重新调用 `run_start`，避免重复执行。
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\handoff-status.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
@@ -289,6 +293,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
 | --- | --- | --- |
 | `run_start` | 启动持久化运行，持久化 `CREATED` 状态记录并拉起有界 worker | 运行记录 JSON |
 | `run_status` | 从数据库读取指定 `run_id` 的持久化 `RunRecord` | 运行记录 JSON |
+| `run_events` | 断线重连后按事件编号增量读取执行进度 | 事件列表 JSON |
 | `run_observe` | 观察运行状态、进程与心跳存活度（`is_alive` / `is_stale` / `recovery_state`） | 观察详情 JSON |
 | `run_wait` | 在有界超时时间内等待运行达到终态（超时不取消任务） | 运行记录 JSON |
 | `run_result` | 获取终态证据结果（非终态调用时抛出错误） | 运行记录 JSON |

@@ -54,6 +54,7 @@ def test_mcp_stdio_server_lists_all_tools() -> None:
         "plan_resume",
         "run_start",
         "run_status",
+        "run_events",
         "run_observe",
         "run_wait",
         "run_result",

@@ -57,7 +57,7 @@ mcp = FastMCP(
         "Codex reviews and merges branches manually; "
         "use run_shape for pre-execution TaskPlan validation only; it never starts workers. "
         "use plan_start, plan_status, plan_wait, plan_result, plan_cancel, and plan_resume for durable serial TaskPlan execution. "
-        "use run_start, run_status, run_observe, run_wait, run_result, and run_cancel for VNext durable runs. "
+        "use run_start, run_status, run_observe, run_events, run_wait, run_result, and run_cancel for VNext durable runs. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
     ),
@@ -511,6 +511,26 @@ def run_status(
         context={"state": record.state.value, "is_alive": record.state not in {RunState.COMPLETE, RunState.FAILED, RunState.CANCELLED}},
     ).to_dict()
     return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
+def run_events(
+    db_path: str,
+    run_id: str,
+    after_event_id: int = 0,
+    limit: int = 100,
+) -> str:
+    """Return reconnectable progress events for a durable run."""
+    valid_db_path = _validate_db_path(db_path)
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    if isinstance(after_event_id, bool) or not isinstance(after_event_id, int) or after_event_id < 0:
+        raise ValueError("after_event_id must be a non-negative integer")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        raise ValueError("limit must be an integer between 1 and 500")
+    manager = DurableRunManager(valid_db_path)
+    manager.run_status(run_id.strip())
+    return json.dumps({"run_id": run_id.strip(), "events": manager.store.list_events(run_id.strip(), after_event_id, limit)}, ensure_ascii=False)
 
 
 @mcp.tool()
