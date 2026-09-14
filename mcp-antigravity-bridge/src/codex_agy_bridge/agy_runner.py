@@ -668,6 +668,7 @@ def _run_subprocess(
                 return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
                 if liveness_probe is None or not liveness_probe():
+                    proc.kill()
                     raise LocalSupervisionTimeoutError(f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s")
                 deadline = time.monotonic() + stall_grace_seconds
     output_queue: queue.Queue[tuple[str, str]] = queue.Queue()
