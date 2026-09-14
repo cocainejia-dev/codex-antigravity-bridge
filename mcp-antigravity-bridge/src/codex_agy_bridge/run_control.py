@@ -195,6 +195,16 @@ class WorkerContext:
         """Send a heartbeat signal to durable storage."""
         self.heartbeat_callback()
 
+    def emit_event(self, kind: str, message: str, details: dict[str, Any] | None = None) -> None:
+        """Publish bounded progress without coupling workers to MCP transport."""
+        callback = self.extra.get("event_callback")
+        if callback is not None:
+            try:
+                callback(kind, message, details)
+            except Exception:
+                # Progress telemetry must never change worker outcome.
+                pass
+
 
 WorkerCallback = Callable[[WorkerContext], Optional[WorkerResult]]
 
@@ -1109,6 +1119,7 @@ class DurableRunManager:
                     heartbeat_callback=lambda: self.store.update_heartbeat(run_id),
                     record=running_record,
                     worktree=worktree or contract.workdir,
+                    extra={"event_callback": lambda kind, message, details=None: self.store.append_event(run_id, kind, message, details)},
                 )
 
                 # Execute injectable worker with duration measurement

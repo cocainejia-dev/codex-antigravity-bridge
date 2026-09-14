@@ -81,6 +81,7 @@ def build_worker_callback(
                 return False
             try:
                 context.heartbeat()
+                context.emit_event("progress", "agy_running", {"probe": probes_count})
             except Exception:
                 pass
             try:
@@ -101,6 +102,7 @@ def build_worker_callback(
                 runner_kwargs["max_liveness_extensions"] = max_liveness_extensions
 
             result = runner(prompt, **runner_kwargs)
+            context.emit_event("output", "agy_finished", {"exit_code": result.exit_code, "used_pty": result.used_pty, "output": (result.text or "")[-4000:]})
         except Exception as exc:  # Worker lifecycle records the failure durably.
             return WorkerResult(success=False, terminal_reason="FAILED", last_error=str(exc))
 
