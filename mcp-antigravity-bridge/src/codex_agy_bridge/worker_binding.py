@@ -100,6 +100,8 @@ def build_worker_callback(
                 runner_kwargs["liveness_probe"] = _liveness_probe
             if _accepts_param(runner, "max_liveness_extensions"):
                 runner_kwargs["max_liveness_extensions"] = max_liveness_extensions
+            if _accepts_param(runner, "output_callback"):
+                runner_kwargs["output_callback"] = lambda chunk: context.emit_event("output", "agy_output", {"chunk": chunk[-4000:]})
 
             result = runner(prompt, **runner_kwargs)
             context.emit_event("output", "agy_finished", {"exit_code": result.exit_code, "used_pty": result.used_pty, "output": (result.text or "")[-4000:]})

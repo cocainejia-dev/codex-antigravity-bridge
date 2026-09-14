@@ -487,6 +487,7 @@ def run_agy(
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
     print_timeout: Optional[float] = None,
+    output_callback: Callable[[str], None] | None = None,
 ) -> AgyResult:
     """Run `agy -p <prompt>` headlessly and return cleaned text output.
 
@@ -531,6 +532,8 @@ def run_agy(
             "stall_grace_seconds": stall_grace_seconds,
             "max_liveness_extensions": max_liveness_extensions,
         }
+    if output_callback is not None:
+        runner_options["output_callback"] = output_callback
     direct = _run_subprocess(args, launch_workdir, timeout, environment, **runner_options)
     direct_text = clean_agy_output(direct.stdout)
     direct_stderr = clean_agy_output(direct.stderr)
@@ -647,6 +650,7 @@ def _run_subprocess(
     liveness_probe: Callable[[], bool] | None = None,
     stall_grace_seconds: float = 60.0,
     max_liveness_extensions: int = DEFAULT_MAX_LIVENESS_EXTENSIONS,
+    output_callback: Callable[[str], None] | None = None,
 ) -> subprocess.CompletedProcess:
     kwargs: dict = {"cwd": workdir, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if env is not None:
@@ -673,6 +677,8 @@ def _run_subprocess(
                 remaining = stall_grace_seconds
             try:
                 stdout, stderr = proc.communicate(timeout=min(1.0, remaining))
+                if output_callback and stdout:
+                    output_callback(stdout[-4000:])
                 return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
                 continue
