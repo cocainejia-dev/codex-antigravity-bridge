@@ -21,6 +21,7 @@ import select
 import shutil
 import socket
 import subprocess
+import queue
 import sys
 import threading
 import time
@@ -658,6 +659,19 @@ def _run_subprocess(
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
     proc = subprocess.Popen(args, **kwargs)
+    output_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+    def _reader(label: str, stream) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                if line:
+                    output_queue.put((label, line))
+        finally:
+            stream.close()
+    readers = [threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True), threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True)]
+    for reader in readers:
+        reader.start()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
     deadline = time.monotonic() + timeout
     extensions = 0
     try:
@@ -676,12 +690,23 @@ def _run_subprocess(
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
             try:
-                stdout, stderr = proc.communicate(timeout=min(1.0, remaining))
-                if output_callback and stdout:
-                    output_callback(stdout[-4000:])
-                return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
-                continue
+                if proc.poll() is not None and all(not reader.is_alive() for reader in readers):
+                    while True:
+                        try:
+                            chunk = output_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        label, chunk = chunk
+                        (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
+                    stdout = "".join(stdout_chunks)
+                    return subprocess.CompletedProcess(args, proc.returncode, stdout, "".join(stderr_chunks))
+                try:
+                    label, chunk = output_queue.get(timeout=min(0.2, remaining))
+                    (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
+                    if output_callback:
+                        output_callback(chunk)
+                except queue.Empty:
+                    continue
     except (TimeoutError, LocalSupervisionTimeoutError):
         proc.kill()
         try:
