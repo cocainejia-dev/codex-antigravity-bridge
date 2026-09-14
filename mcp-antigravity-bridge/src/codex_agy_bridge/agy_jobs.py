@@ -310,9 +310,19 @@ class AgyJobRegistry:
             used_pty = False
             result_truncated = False
         elif result is not None:
-            state = "completed" if result.exit_code == 0 else "failed"
-            health = "COMPLETED" if result.exit_code == 0 else "FAILED"
-            exit_code = result.exit_code
+            error_kind = classify_agy_error(result.text or "", result.stderr or "")
+            # AGY can return exit_code=0 while its print channel timed out and
+            # the turn is still in progress. That is not a successful worker
+            # completion and must remain visible as a failed/incomplete run.
+            timeout_like = error_kind in {
+                "AGY_PRINT_TIMEOUT",
+                "LOCAL_SUPERVISION_TIMEOUT",
+                "REMOTE_EXECUTION_TIMEOUT",
+                "CONNECT_TIMEOUT",
+            }
+            state = "failed" if result.exit_code != 0 or timeout_like else "completed"
+            health = "FAILED" if state == "failed" else "COMPLETED"
+            exit_code = result.exit_code if result.exit_code != 0 else (1 if timeout_like else 0)
             text = result.text
             used_pty = result.used_pty
             result_truncated = False
