@@ -442,6 +442,12 @@ class AgyJobRegistry:
         now_iso = _utc_now_iso()
         now_mono = monotonic()
         prompt_hash = compute_prompt_hash(prompt)
+        # A project directory is the natural conflict boundary.  If callers
+        # omit task_key, derive one so a second command cannot mutate the same
+        # worktree while the first worker is still active.
+        effective_task_key = task_key
+        if effective_task_key is None and workdir:
+            effective_task_key = f"workdir:{Path(workdir).expanduser().resolve()}"
 
         with self._lock:
             if self._closed:
@@ -452,7 +458,7 @@ class AgyJobRegistry:
         try:
             self._store.reserve_and_create(
                 job_id=job_id,
-                task_key=task_key,
+                task_key=effective_task_key,
                 workdir=workdir,
                 prompt_hash=prompt_hash,
                 owner_session_id=self.bridge_session_id,
@@ -468,7 +474,7 @@ class AgyJobRegistry:
                     )
 
                     telemetry_db = telemetry_path_for(self._store.db_path)
-                    metadata = {"task_key": task_key, "job_id": job_id}
+                    metadata = {"task_key": effective_task_key, "job_id": job_id}
                     record_duplicate_quota_risk_event(
                         run_id=job_id,
                         project_dir=workdir,
@@ -491,7 +497,7 @@ class AgyJobRegistry:
             from .telemetry_hooks import record_agy_job_start_event, telemetry_path_for
             record_agy_job_start_event(
                 job_id=job_id,
-                task_key=task_key,
+                task_key=effective_task_key,
                 workdir=workdir,
                 db_path=telemetry_path_for(self._store.db_path),
             )
@@ -590,7 +596,7 @@ class AgyJobRegistry:
                 else:
                     record = _JobRecord(
                         future=future,
-                        task_key=task_key,
+                        task_key=effective_task_key,
                         workdir=workdir,
                         prompt_hash=prompt_hash,
                         submitted_at=now_iso,
