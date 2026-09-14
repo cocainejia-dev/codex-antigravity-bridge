@@ -57,7 +57,7 @@ mcp = FastMCP(
         "Codex reviews and merges branches manually; "
         "use run_shape for pre-execution TaskPlan validation only; it never starts workers. "
         "use plan_start, plan_status, plan_wait, plan_result, plan_cancel, and plan_resume for durable serial TaskPlan execution. "
-        "use run_start, run_status, run_observe, run_wait, run_result, and run_cancel for VNext durable runs. "
+        "use run_start, run_status, run_observe, run_events, run_wait, run_result, and run_cancel for VNext durable runs. "
         "Only pass dangerously_skip_permissions=true after the user explicitly "
         "authorizes that exact trusted worktree and task."
     ),
