@@ -15,6 +15,7 @@ Reference implementations:
 from __future__ import annotations
 
 import math
+import io
 import os
 import re
 import select
@@ -659,6 +660,16 @@ def _run_subprocess(
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash
     proc = subprocess.Popen(args, **kwargs)
+    if not isinstance(proc.stdout, io.TextIOBase) or not isinstance(proc.stderr, io.TextIOBase):
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=max(0.001, deadline - time.monotonic()))
+                return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                if liveness_probe is None or not liveness_probe():
+                    raise LocalSupervisionTimeoutError(f"LOCAL_SUPERVISION_TIMEOUT: agy timed out after {timeout}s")
+                deadline = time.monotonic() + stall_grace_seconds
     output_queue: queue.Queue[tuple[str, str]] = queue.Queue()
     def _reader(label: str, stream) -> None:
         try:
