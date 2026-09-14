@@ -41,6 +41,20 @@ from codex_agy_bridge import server
 from codex_agy_bridge.agy_runner import AgyResult
 
 
+def test_agy_supervise_start_returns_polling_handle(monkeypatch=None, tmp_path=None):
+    mp = monkeypatch or _SimpleMonkeyPatch()
+    workdir = str(tmp_path or Path.cwd())
+    mp.setattr(server, "agy_start", lambda **kwargs: "job-123")
+    try:
+        payload = json.loads(server.agy_supervise_start("do work", workdir))
+        assert payload["job_id"] == "job-123"
+        assert payload["supervision"] == "ACTIVE"
+        assert payload["wait_window_expired_is_terminal"] is False
+    finally:
+        if monkeypatch is None:
+            mp.undo()
+
+
 class _SimpleMonkeyPatch:
     def __init__(self):
         self._undos = []

@@ -49,9 +49,9 @@ mcp = FastMCP(
         "Bridge from Codex to the Google Antigravity agent and VNext durable run control. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
-        "use agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
+        "use agy_supervise_start (preferred for long work), agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
         "with a caller-created isolated workdir; "
-        "use agy_jobs_recent to inspect durable task history; "
+        "use agy_jobs_recent and agy_supervise_status to inspect active task history; "
         "use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
         "the bridge creates separate Git worktrees and starts bounded tasks, but "
         "Codex reviews and merges branches manually; "
@@ -245,6 +245,41 @@ def agy_start(
 
 
 @mcp.tool()
+def agy_supervise_start(
+    prompt: str,
+    workdir: str,
+    timeout: float = float(TASK_WALL_CLOCK_BUDGET),
+    dangerously_skip_permissions: bool = False,
+    task_key: str | None = None,
+) -> str:
+    """Start a supervised task and return a durable polling handle.
+
+    This is the default entry point for long-running work.  It never waits for
+    the worker inside the MCP request, so an RPC/window timeout cannot detach
+    the caller from the task.  The returned JSON contains the job id and the
+    required status/wait tools; callers must keep polling that same id until a
+    terminal state is observed.
+    """
+    job_id = agy_start(
+        prompt=prompt,
+        workdir=workdir,
+        timeout=timeout,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+        task_key=task_key,
+    )
+    return json.dumps(
+        {
+            "job_id": job_id,
+            "supervision": "ACTIVE",
+            "poll_with": ["agy_status", "agy_wait"],
+            "continue_until": ["completed", "failed", "cancelled"],
+            "wait_window_expired_is_terminal": False,
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
 async def agy_status(job_id: str) -> str:
     """Return JSON status for an asynchronous agy task."""
     result = await asyncio.to_thread(agy_jobs.status, job_id)
@@ -284,6 +319,40 @@ def agy_jobs_recent(
     valid_limit = _validate_limit(limit)
     records = agy_jobs.recent(limit=valid_limit, task_key=task_key, state=state)
     return json.dumps(records, ensure_ascii=False)
+
+
+@mcp.tool()
+def agy_supervise_status(workdir: str = "") -> str:
+    """Return the active supervision state for one project or all projects.
+
+    This is the reconnect/status entry point after a chat or MCP restart.  It
+    reports active jobs, heartbeat age, and terminal/error evidence without
+    starting another worker.
+    """
+    requested = str(Path(workdir).expanduser().resolve()) if workdir.strip() else None
+    records = agy_jobs.recent(limit=100)
+    active = []
+    for record in records:
+        if record.get("state") not in {"submitted", "queued", "running"}:
+            continue
+        record_workdir = record.get("workdir")
+        if requested and record_workdir:
+            try:
+                if str(Path(record_workdir).expanduser().resolve()) != requested:
+                    continue
+            except OSError:
+                continue
+        active.append(record)
+    return json.dumps(
+        {
+            "supervision": "ACTIVE" if active else "IDLE",
+            "workdir": requested,
+            "active_jobs": active,
+            "has_conflict": len(active) > 1,
+            "terminal_states": ["completed", "failed", "cancelled", "lost"],
+        },
+        ensure_ascii=False,
+    )
 
 
 @mcp.tool()

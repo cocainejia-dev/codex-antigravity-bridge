@@ -40,6 +40,8 @@ def test_mcp_stdio_server_lists_all_tools() -> None:
         "agy_ask",
         "agy_ask_json",
         "agy_start",
+        "agy_supervise_start",
+        "agy_supervise_status",
         "agy_status",
         "agy_wait",
         "agy_collab_start",
