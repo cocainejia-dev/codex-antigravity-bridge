@@ -689,8 +689,7 @@ def _run_subprocess(
                 extensions += 1
                 deadline = time.monotonic() + stall_grace_seconds
                 remaining = stall_grace_seconds
-            try:
-                if proc.poll() is not None and all(not reader.is_alive() for reader in readers):
+            if proc.poll() is not None and all(not reader.is_alive() for reader in readers):
                     while True:
                         try:
                             chunk = output_queue.get_nowait()
@@ -700,13 +699,13 @@ def _run_subprocess(
                         (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
                     stdout = "".join(stdout_chunks)
                     return subprocess.CompletedProcess(args, proc.returncode, stdout, "".join(stderr_chunks))
-                try:
-                    label, chunk = output_queue.get(timeout=min(0.2, remaining))
-                    (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
-                    if output_callback:
-                        output_callback(chunk)
-                except queue.Empty:
-                    continue
+            try:
+                label, chunk = output_queue.get(timeout=min(0.2, remaining))
+                (stdout_chunks if label == "stdout" else stderr_chunks).append(chunk)
+                if output_callback:
+                    output_callback(chunk)
+            except queue.Empty:
+                continue
     except (TimeoutError, LocalSupervisionTimeoutError):
         proc.kill()
         try:
