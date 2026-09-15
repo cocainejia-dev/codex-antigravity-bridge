@@ -17,6 +17,21 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
+
+def _supervisor_verification(workdir: str | None, text: str | None) -> dict[str, Any]:
+    """Independently verify worker evidence; exit code alone is insufficient."""
+    diff_present = None
+    if workdir:
+        try:
+            probe = subprocess.run(["git", "status", "--porcelain"], cwd=workdir,
+                                   capture_output=True, text=True, timeout=10)
+            diff_present = bool(probe.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            diff_present = None
+    output = (text or "").lower()
+    tests_passed = any(marker in output for marker in ("build successful", "tests passed", "passed"))
+    return {"diff_present": diff_present, "tests_passed_evidence": tests_passed}
+
 from .agy_runner import (
     TASK_WALL_CLOCK_BUDGET,
     AgyResult,
@@ -310,6 +325,7 @@ class AgyJobRegistry:
             used_pty = False
             result_truncated = False
         elif result is not None:
+            verification = _supervisor_verification(record.workdir if "record" in locals() and record else None, result.text)
             error_kind = classify_agy_error(result.text or "", result.stderr or "")
             # AGY can return exit_code=0 while its print channel timed out and
             # the turn is still in progress. That is not a successful worker
@@ -320,13 +336,15 @@ class AgyJobRegistry:
                 "REMOTE_EXECUTION_TIMEOUT",
                 "CONNECT_TIMEOUT",
             }
-            state = "failed" if result.exit_code != 0 or timeout_like else "completed"
+            evidence_failure = bool(record.workdir) and result.exit_code == 0 and (verification["diff_present"] is False or not verification["tests_passed_evidence"])
+            state = "failed" if result.exit_code != 0 or timeout_like or evidence_failure else "completed"
             health = "FAILED" if state == "failed" else "COMPLETED"
             exit_code = result.exit_code if result.exit_code != 0 else (1 if timeout_like else 0)
             text = result.text
             used_pty = result.used_pty
             result_truncated = False
-            error = describe_agy_failure(result) if state == "failed" else None
+            error = ("SUPERVISOR_ACCEPTANCE_FAILED: worker exit code was zero but independent diff/test evidence was insufficient"
+                     if evidence_failure else describe_agy_failure(result) if state == "failed" else None)
         else:
             state = "failed"
             health = "FAILED"
@@ -706,6 +724,7 @@ class AgyJobRegistry:
                 return status
 
             if result is not None:
+                verification = _supervisor_verification(record.workdir, result.text)
                 state = "completed" if result.exit_code == 0 else "failed"
                 status = {
                     "job_id": job_id,
@@ -720,6 +739,7 @@ class AgyJobRegistry:
                     "elapsed_seconds": elapsed,
                     "heartbeat_at": record.heartbeat_at or record.completed_at,
                     "last_worktree_activity_at": record.last_worktree_activity_at,
+                    "supervisor_verification": verification,
                 }
                 if state == "failed":
                     error_kind = classify_agy_error(result.text, result.stderr)
