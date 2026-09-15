@@ -140,8 +140,10 @@ errors, and Windows ConPTY problems are reported without silent legacy fallback.
 | Async isolated task | `agy_start` / `agy_status` | Caller-created | One independent implementation task |
 | Collaboration MVP | `agy_collab_start` / `agy_collab_status` | Bridge-created | Independent frontend, backend, or test tracks |
 
-`headless` is the default display mode. `terminal` opens one visible Windows
-console per collaboration task. A session is capped at four tasks.
+`agy_start` keeps its headless default for compatibility. The preferred
+`agy_supervise_start` entry point defaults to `terminal` on Windows and opens
+one visible console with live agy output; pass `display_mode="headless"` to
+keep it in the background. Collaboration sessions remain capped at four tasks.
 
 ## Thirty-second workflow
 

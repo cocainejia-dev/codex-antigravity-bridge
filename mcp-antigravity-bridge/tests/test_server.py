@@ -55,6 +55,25 @@ def test_agy_supervise_start_returns_polling_handle(monkeypatch=None, tmp_path=N
             mp.undo()
 
 
+def test_agy_supervise_start_forwards_default_display_mode(monkeypatch=None, tmp_path=None):
+    mp = monkeypatch or _SimpleMonkeyPatch()
+    workdir = str(tmp_path or Path.cwd())
+    captured = {}
+
+    def fake_start(**kwargs):
+        captured.update(kwargs)
+        return "job-default-display"
+
+    mp.setattr(server, "agy_start", fake_start)
+    try:
+        assert json.loads(server.agy_supervise_start("do work", workdir))["job_id"] == "job-default-display"
+        expected = "terminal" if server.os.name == "nt" else "headless"
+        assert captured["display_mode"] == expected
+    finally:
+        if monkeypatch is None:
+            mp.undo()
+
+
 class _SimpleMonkeyPatch:
     def __init__(self):
         self._undos = []
@@ -336,6 +355,25 @@ def test_agy_start_forwards_task_key(monkeypatch=None, tmp_path=None):
         job_id = server.agy_start("Run task", workdir=workdir_str, task_key="my-key")
         assert job_id == "job-123"
         assert captured.get("task_key") == "my-key"
+    finally:
+        if monkeypatch is None:
+            mp.undo()
+
+
+def test_agy_start_forwards_display_mode(monkeypatch=None, tmp_path=None):
+    mp = monkeypatch or _SimpleMonkeyPatch()
+    workdir_str = str(tmp_path) if tmp_path is not None else "."
+    captured = {}
+
+    def fake_start(*args, **kwargs):
+        captured.update(kwargs)
+        return "job-terminal"
+
+    mp.setattr(server.agy_jobs, "start", fake_start)
+    try:
+        job_id = server.agy_start("Show live output", workdir=workdir_str, display_mode="terminal")
+        assert job_id == "job-terminal"
+        assert captured.get("display_mode") == "terminal"
     finally:
         if monkeypatch is None:
             mp.undo()

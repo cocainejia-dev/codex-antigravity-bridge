@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-antigravity-bridge" / "src"))
-from codex_agy_bridge.agy_jobs import agy_jobs  # noqa: E402
-
+from codex_agy_bridge.durable_jobs import (
+    DurableJobStore,
+    get_default_db_path,
+)
 
 HTML = """<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>AGY Supervisor</title>
 <style>body{font:15px system-ui;margin:0;background:#f3f6fb;color:#172033}.wrap{max-width:1050px;margin:36px auto;padding:0 22px}h1{margin-bottom:6px}.sub{color:#64748b;margin-bottom:24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px}.card{background:white;border-radius:14px;padding:18px;box-shadow:0 3px 14px #17203312;border-left:6px solid #94a3b8}.running{border-color:#22c55e}.failed{border-color:#ef4444}.completed{border-color:#64748b}.lost{border-color:#f59e0b}.badge{float:right;border-radius:99px;padding:4px 10px;font-size:12px;background:#e2e8f0}.running .badge{background:#dcfce7;color:#166534}.failed .badge,.lost .badge{background:#fee2e2;color:#991b1b}.meta{color:#64748b;font-size:13px;line-height:1.7}.job{font-family:monospace;font-size:12px;color:#475569;word-break:break-all}.empty{background:white;padding:30px;border-radius:14px;text-align:center;color:#64748b}details{margin-top:10px}pre{white-space:pre-wrap;font-size:12px;background:#f8fafc;padding:10px;border-radius:8px}</style>
@@ -18,9 +20,14 @@ HTML = """<!doctype html><meta charset='utf-8'><meta name='viewport' content='wi
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802
+    store: DurableJobStore
+
+    def do_GET(self):
         if self.path == "/api/jobs":
-            records = agy_jobs.recent(limit=100)
+            # This process is a read-only observer.  Importing the global
+            # AgyJobRegistry would reconcile the MCP process's live jobs as
+            # an unrelated session and mark them INTERRUPTED.
+            records = self.store.get_recent(limit=100)
             for item in records:
                 key = item.get("task_key") or ""
                 if key.startswith("workdir:"):
@@ -36,7 +43,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8765); a = p.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--db-path", default=str(get_default_db_path()), help="durable jobs SQLite path")
+    a = p.parse_args()
+    Handler.store = DurableJobStore(a.db_path)
     print(f"AGY dashboard: http://{a.host}:{a.port}", flush=True)
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
 

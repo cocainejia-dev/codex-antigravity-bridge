@@ -93,10 +93,10 @@ flowchart LR
 
 | 显示方式 | 默认值 | 行为 | 平台 |
 | --- | :---: | --- | --- |
-| `headless` | ✅ | 不弹出窗口；通过 MCP 返回任务状态和最终结果 | Windows、macOS、Linux |
-| `terminal` | 关闭 | 每个运行中的任务打开一个可见终端窗口，实时显示 agy 输出 | Windows |
+| `headless` | `agy_start` 默认 | 不弹出窗口；通过 MCP 返回任务状态和最终结果 | Windows、macOS、Linux |
+| `terminal` | `agy_supervise_start` 默认（Windows） | 每个运行中的任务打开一个可见终端窗口，实时显示 agy 输出 | Windows |
 
-实时终端是 **协同开发模式的可选显示方式**，不是第五种任务模式。它不会
+实时终端也适用于 `agy_start` 与 `agy_supervise_start`，不是第五种任务模式。它不会
 改变任务隔离、分支、worktree、权限和验收规则。当前实现使用可见 Windows
 控制台；如果系统把 Windows Terminal 设为默认终端，它可能由 Windows
 Terminal 承载，否则会使用系统控制台窗口。
@@ -117,7 +117,7 @@ Terminal 承载，否则会使用系统控制台窗口。
 只需要 agy 返回一次结果        → agy_ask / agy_ask_json
 Codex 继续写，agy 做一个任务    → agy_start + agy_status
 Codex 写后端，agy 写前端        → agy_collab_start + agy_collab_status
-想看 agy 实时输出              → 协同模式 + display_mode="terminal"
+想看 agy 实时输出              → agy_supervise_start + display_mode="terminal"
 ```
 
 这个项目的核心取舍很简单：**让 Codex 保持监督权，让 `agy` 只做清晰、可回滚、可验收的子任务。**
@@ -312,10 +312,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\runtime-provenance.ps1
 `owned_paths` 不能重叠。`shared_contract` 用来记录接口、字段和路由等共享
 约定，避免前后端各自猜测。
 
-协同启动前，Codex 会先询问是否打开实时终端，以及本次派几个任务给 `agy`。
-默认不打开实时终端、只派 1 个任务；最多允许 4 个任务。选择实时模式后，
-Windows 会为每个运行中的任务打开一个可见终端窗口，用户可以直接看到 `agy`
-的执行过程。
+调用 `agy_supervise_start` 时，Windows 默认打开一个可见终端窗口；也可以显式
+传入 `display_mode="headless"` 关闭窗口。协同启动仍可按任务选择显示方式，
+默认只派 1 个任务，最多允许 4 个任务。终端窗口会直接显示 `agy` 的执行过程。
 
 ```text
 agy_collab_start(

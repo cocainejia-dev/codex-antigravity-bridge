@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 from pathlib import Path
 import threading
 import time
@@ -42,6 +43,7 @@ from .plan_executor import PlanExecutor
 from .worker_binding import build_worker_callback
 
 _run_resume_lock = threading.Lock()
+DEFAULT_ASYNC_DISPLAY_MODE = "terminal" if os.name == "nt" else "headless"
 
 mcp = FastMCP(
     "codex-agy-bridge",
@@ -49,7 +51,7 @@ mcp = FastMCP(
         "Bridge from Codex to the Google Antigravity agent and VNext durable run control. "
         "Use agy_ask for a one-shot headless call (`agy -p`); "
         "use agy_ask_json when you want structured JSON output; "
-        "use agy_supervise_start (preferred for long work), agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
+        "use agy_supervise_start (preferred for long work; opens a live terminal on Windows by default), agy_start, agy_status, and agy_wait for explicit asynchronous worktree collaboration "
         "with a caller-created isolated workdir; "
         "use agy_jobs_recent and agy_supervise_status to inspect active task history; "
         "use agy_collab_start and agy_collab_status for the MVP collaboration mode: "
@@ -220,13 +222,16 @@ def agy_start(
     timeout: float = float(TASK_WALL_CLOCK_BUDGET),
     dangerously_skip_permissions: bool = False,
     task_key: str | None = None,
+    display_mode: str = "headless",
 ) -> str:
     """Start an asynchronous agy task and return its job id.
 
     Use this for explicit parallel worktree collaboration. The caller must
     provide an existing isolated worktree as workdir; the bridge does not
-    create one. Poll the returned id with ``agy_status`` or wait with ``agy_wait``
-    while Codex continues work elsewhere.
+    create one. ``display_mode='terminal'`` opens a visible console with live
+    agy output; ``agy_start`` defaults to ``headless`` for compatibility. Poll
+    the returned id with ``agy_status`` or wait with ``agy_wait`` while Codex
+    continues work elsewhere.
     """
     if not workdir.strip():
         raise ValueError(
@@ -240,6 +245,7 @@ def agy_start(
         workdir=workdir or None,
         timeout=_validate_timeout(timeout),
         dangerously_skip_permissions=dangerously_skip_permissions,
+        display_mode=display_mode,
         task_key=task_key,
     )
 
@@ -251,6 +257,7 @@ def agy_supervise_start(
     timeout: float = float(TASK_WALL_CLOCK_BUDGET),
     dangerously_skip_permissions: bool = False,
     task_key: str | None = None,
+    display_mode: str = DEFAULT_ASYNC_DISPLAY_MODE,
 ) -> str:
     """Start a supervised task and return a durable polling handle.
 
@@ -266,6 +273,7 @@ def agy_supervise_start(
         timeout=timeout,
         dangerously_skip_permissions=dangerously_skip_permissions,
         task_key=task_key,
+        display_mode=display_mode,
     )
     return json.dumps(
         {
